@@ -1,7 +1,6 @@
 {
   "name": "dsh-todo-time-log",
   "version": "0.5.0",
-  "private": true,
   "description": "查看待办事项，并记录与展示每个待办的创建时间与完成时间（Todo time log for DeepSeek Harness）",
   "keywords": [
     "dsh",
@@ -11,6 +10,15 @@
     "time-log"
   ],
   "license": "MIT",
+  "author": "FantasyStarry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FantasyStarry/dsh-todo-time-log.git"
+  },
+  "homepage": "https://github.com/FantasyStarry/dsh-todo-time-log#readme",
+  "bugs": {
+    "url": "https://github.com/FantasyStarry/dsh-todo-time-log/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -37,7 +45,11 @@
   "scripts": {
     "test": "node test/parse.mjs && node test/smoke.mjs && node test/http.mjs",
     "check": "node --check lib/time.js && node --check lib/parse.js && node --check lib/files.js && node --check lib/store.js && node --check lib/index.js && node --check lib/client.js",
-    "audit": "node test/client-audit.mjs"
+    "audit": "node test/client-audit.mjs",
+    "prepublishOnly": "npm run check && npm test && npm run audit"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dsh": {
     "bundle": {

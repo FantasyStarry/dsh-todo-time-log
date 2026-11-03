@@ -48,11 +48,15 @@ dsh-todo-time-log/
 │   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图）
 ├── docs/
 │   ├── verification.md     # 独立验证报告（另一个 agent 产出，含 PASS/FAIL/盲区）
+│   ├── publishing.md       # npm 发布流程：bootstrap / Trusted Publisher / 版本策略 / 排错
 │   ├── research/           # 看板设计调研 + 现状审计（六期改版的依据）
 │   │   ├── kanban-design-research.md   # 15 个可借鉴模式 + 差距 + P0/P1/P2 + 反模式（带来源）
 │   │   └── kanban-current-state.md     # 代码/数据/门禁现状、风险 R1–R12、快速改进点 Q1–Q8
 │   ├── design/kanban-plan.md           # 看板改版方案与后续路线（P0 已实现 / P1 / P2）
 │   └── preview/            # 面板渲染预览图（真实 client.js + 主题 token 的静态渲染，见其 README）
+├── .github/workflows/
+│   └── publish.yml         # 打 tag 自动发布 npm（OIDC 可信发布 + 校验 + GitHub Release）
+├── LICENSE                 # MIT
 └── README.md
 ```
 
@@ -560,3 +564,22 @@ UI 手测清单（八期：类型标签，**需刷新页面 + 重启插件**）�
 | 七期 A/B/C 渲染验收 | 同一套 jsdom harness 扩到 **42 条**断言：泳道（≥6 个、折叠/展开）、紧凑密度 class、移到分类写回 + toast + 撤销、`/`/`n`/`f` 快捷键、优先级徽标/卡片 select 写回 + 撤销、新建表单携带优先级、表格排序含优先级；产出 `04`、`12`–`18` 共 11 张看板预览 | PASS（渲染/结构）；真机交互需刷新后人工确认 |
 | 八期 Host 契约（type v5） | `node --check` 3 个 Host 模块通过；`npm test` **79 + 174 + 66** 全绿；v1–v4→v5 迁移、type 校验/归一化/部分更新、quick-add 标记与表单回退均有断言覆盖 | PASS |
 | 八期类型 UI + @ 菜单渲染验收 | jsdom harness **58 条**断言全绿（类型徽标、类型 select 写回 + 撤销、新建表单携带类型、类型筛选、搜索命中类型名、表格类型徽标；`/todo` 草稿的 `@` 菜单含「待办优先级 / 待办类型」候选，选中分别插入 `!high ` / `^bug `，分类候选行为不变）；`npm run audit` **28/28**（i18n **253 键/语言**、24 token、189 类名）；预览 `04`、`12`–`18` 已按类型徽标重拍 | PASS（渲染/结构）；真机需重启插件 + 刷新页面确认 |
+
+---
+
+## 8. 发布 npm 版本
+
+发布由 GitHub Actions 工作流 [`.github/workflows/publish.yml`](./.github/workflows/publish.yml) 自动完成：
+推送形如 `v0.5.1` 的 tag 时，工作流会校验 tag 与 `package.json` 版本一致、跑 `npm run check` / `npm test` / `npm run audit`、打包预演，
+再通过 **npm 可信发布（OIDC，无需 NPM_TOKEN）** 发布并自动创建 GitHub Release。
+
+```bash
+# 日常发版：改版本 → 打 tag → 推送
+npm version patch -m "chore: release v%s"   # 或 minor / major
+git push origin main --follow-tags
+```
+
+首次发布需要先手动 bootstrap 一次，并在 npmjs.com 上为本仓库配置 Trusted Publisher（工作流文件名填 `publish.yml）；
+手动触发预演、版本策略、回滚与排错见 [`docs/publishing.md`](./docs/publishing.md)。
+
+[![Publish to npm](https://github.com/FantasyStarry/dsh-todo-time-log/actions/workflows/publish.yml/badge.svg)](https://github.com/FantasyStarry/dsh-todo-time-log/actions/workflows/publish.yml)

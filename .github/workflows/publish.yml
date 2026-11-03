@@ -1,0 +1,93 @@
+# 打 tag（v1.2.3）→ 全量校验 → npm publish（OIDC 可信发布）→ GitHub Release
+#
+# 一次性前置（详见 docs/publishing.md）：
+#   1. 先手动 bootstrap 发布一次（Trusted Publisher 只能给已存在的包配置）
+#   2. npmjs.com → 包 Settings → Trusted publishing 添加：
+#      GitHub Actions / FantasyStarry / dsh-todo-time-log / publish.yml
+#   3. 不需要 NPM_TOKEN 密钥（本工作流用 id-token 换取短期发布凭证）
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "只做打包预演（npm publish --dry-run），不真正发布"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # 创建 GitHub Release
+  id-token: write # npm 可信发布（OIDC）
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 校验并发布
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js（npm ≥ 11.5.1 才支持可信发布）
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 读取包名与版本，校验 tag 与版本一致
+        id: meta
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::tag 为 $GITHUB_REF_NAME，但 package.json 版本为 $VERSION（应为 v$VERSION）"
+            exit 1
+          fi
+          echo "发布目标：$NAME@$VERSION"
+
+      - name: 检查该版本是否已在 npm 上
+        id: exists
+        run: |
+          if npm view "${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" version >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }} 已发布，跳过 npm publish"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 语法检查
+        run: npm run check
+
+      - name: 单元 / 冒烟 / HTTP 测试
+        run: npm test
+
+      - name: 客户端静态审计
+        run: npm run audit
+
+      - name: 打包预演（确认发布内容）
+        run: npm pack --dry-run
+
+      - name: 发布到 npm（可信发布 + provenance）
+        if: steps.exists.outputs.value == 'false' && inputs.dry_run != true
+        run: npm publish --provenance
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: 发布预演（workflow_dispatch 且 dry_run = true）
+        if: inputs.dry_run == true
+        run: npm publish --dry-run --provenance
+
+      - name: 创建 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') && steps.exists.outputs.value == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
