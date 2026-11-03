@@ -138,3 +138,21 @@ npm deprecate dsh-todo-time-log@0.5.1 "此版本存在 XXX 问题，请升级到
 ## 8. 备选：一直用 staged publish
 
 不想配 Trusted Publisher 也可以长期用 `mode=stage` + 网页 Approve：安全（每次人工 2FA）但每个版本都要点一次。
+
+## 9. 本仓库实测记录（2026-11-03）
+
+| 步骤 | 结果 |
+| --- | --- |
+| 首发用 token 直接 `npm publish` | ❌ `EOTP`：npm 2026-07 起限制 bypass-2FA token 直接发布 |
+| `mode=stage`（stage id `e4babed3-…`） | ✅ 提交成功，registry 出现占位版本 `0.0.0-stage` |
+| npm 页面自动审核（Validating） | ✅ 约 5 分钟通过，网页 Approve（2FA）后 `0.5.0` 上架 |
+| Trusted Publisher（勾 Allow npm publish） | ✅ tag `v0.5.1` 推送 → OIDC 直接发布成功，带 provenance 证明 |
+| 删除 `NPM_TOKEN` secret | ✅ 完成，后续发布会打印「未设置 NPM_TOKEN，使用 OIDC 可信发布」 |
+
+两个实测坑：
+
+- npm 发布后日志会显示 “Your package is being processed and may take a few minutes to become available”，
+  **版本要过 1–2 分钟才出现在 registry**；`npm view` 还有缓存，短时间内查不到别以为失败了，
+  直接查 `https://registry.npmjs.org/<pkg>/<version>` 更准。
+- `0.0.0-stage` 占位版本会永久留在 version 列表里（无实际内容），不影响安装与 `latest`。
+
