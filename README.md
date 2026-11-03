@@ -579,9 +579,11 @@ npm version patch -m "chore: release v%s"   # 或 minor / major
 git push origin main --follow-tags
 ```
 
-本机**不需要** `npm login` / `npm publish`：首次建包也能在工作流里完成——在 npmjs.com 生成一个 granular token 存为仓库 secret `NPM_TOKEN`，
-然后 Actions → Publish to npm → Run workflow（mode=`publish`）；首发成功后配置 Trusted Publisher（工作流文件名填 `publish.yml`）并删除该 token。
-之后 tag 推送即全自动；工作流还支持 mode=`stage`（提交 npm 待审批，可创建新包）与 mode=`dry-run`（只预演）。
+> npm 2026 起已限制 bypass-2FA token「直接发布」（`EOTP`），自动化发布必须走 **staged publishing + OIDC**。
+
+首次建包：npmjs.com 生成 granular token 存为仓库 secret `NPM_TOKEN` → Actions → Publish to npm → Run workflow（mode=`stage`）
+→ 到 npmjs.com 包页 **Staged Packages → Approve**（2FA）→ 配 Trusted Publisher（工作流文件名 `publish.yml`，勾选允许 `npm publish`）→ 删除 token。
+之后 tag 推送即全自动；工作流还支持 mode=`publish`（OIDC 直接发布）与 mode=`dry-run`（只预演）。
 完整步骤、版本策略、回滚与排错见 [`docs/publishing.md`](./docs/publishing.md)。
 
 [![Publish to npm](https://github.com/FantasyStarry/dsh-todo-time-log/actions/workflows/publish.yml/badge.svg)](https://github.com/FantasyStarry/dsh-todo-time-log/actions/workflows/publish.yml)

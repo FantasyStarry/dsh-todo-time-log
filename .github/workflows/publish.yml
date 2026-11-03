@@ -1,18 +1,18 @@
 # 发布到 npm
 #
-# 触发：
-#   - push tag v*.*.*        → 校验 + 全量测试 + npm publish（OIDC 可信发布）
-#   - workflow_dispatch      → 手动选择 mode：
-#       dry-run（默认）      → 只做 npm publish --dry-run
-#       publish             → 直接发布当前版本（有 NPM_TOKEN 则用令牌，否则 OIDC）
-#       stage               → npm stage publish 提交待审批（可创建尚不存在的新包）
+# 认证现状（2026-11，重要）：
+#   npm 已限制 bypass-2FA token 做「直接发布」（会报 EOTP），2027-01 起完全移除。
+#   自动化发布的正确姿势：
+#     首次建包 → npm stage publish（token 提交，不需要 2FA）→ npmjs.com 点 Approve（2FA）
+#     日常发布 → Trusted Publisher（OIDC）+ npm publish（或同样走 stage + Approve）
 #
-# 首次发布（包还不在 registry 上）：
-#   1. npmjs.com → Access Tokens → Granular Access Token（勾 Bypass 2FA）
-#   2. GitHub 仓库 Settings → Secrets → Actions → 新建 NPM_TOKEN
-#   3. Actions → Publish to npm → Run workflow → mode = publish
-#   4. 发布成功后：npmjs.com 配置 Trusted Publisher（publish.yml）→ 删除 NPM_TOKEN
-#   之后 tag 推送即全自动，无需任何 token。
+# 触发：
+#   - push tag v*.*.*  → 校验 + 全量测试 + npm publish --provenance（OIDC）+ GitHub Release
+#   - workflow_dispatch → mode：
+#       dry-run（默认）→ 只做 npm publish --dry-run
+#       stage          → npm stage publish 提交待审批（可创建新包，用 NPM_TOKEN；不需 2FA）
+#       publish        → OIDC 直接发布（需先在 npmjs.com 配好 Trusted Publisher）
+#
 # 详见 docs/publishing.md
 name: Publish to npm
 
@@ -23,12 +23,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "dry-run=只预演 / publish=直接发布 / stage=提交待审批（首次建包可用）"
+        description: "dry-run=预演 / stage=提交待审批（首次建包选这个）/ publish=OIDC 直接发布"
         type: choice
         options:
           - dry-run
-          - publish
           - stage
+          - publish
         default: dry-run
 
 permissions:
@@ -79,13 +79,13 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 配置 npm 令牌（存在 NPM_TOKEN secret 时用于首次发布）
+      - name: 配置 npm 令牌（存在 NPM_TOKEN secret 时用于 staged publish）
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -n "$NPM_TOKEN" ]; then
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > .npmrc
-            echo "::notice::检测到 NPM_TOKEN，使用令牌认证"
+            echo "::notice::检测到 NPM_TOKEN，使用令牌认证（仅用于 stage；直接 publish 需要 OIDC）"
           else
             echo "::notice::未设置 NPM_TOKEN，使用 OIDC 可信发布"
           fi
@@ -102,15 +102,25 @@ jobs:
       - name: 打包预演（确认发布内容）
         run: npm pack --dry-run
 
-      - name: 发布到 npm（tag 触发，或 mode=publish）
+      - name: 发布到 npm（tag 触发，或 mode=publish；需 Trusted Publisher）
         if: steps.exists.outputs.value == 'false' && (github.event_name == 'push' || inputs.mode == 'publish')
-        run: npm publish --provenance
+        run: |
+          if ! npm publish --provenance; then
+            echo "::error::npm publish 失败。若报 EOTP（一次性密码），说明 npm 已禁止 bypass-2FA token 直接发布。"
+            echo "::error::首次建包请改用 Actions → Run workflow → mode=stage，然后到 npmjs.com → 包 → Staged Packages → Approve（2FA）。"
+            echo "::error::包已存在后，配置 Trusted Publisher（勾选允许 npm publish）并删除 NPM_TOKEN，tag 推送即可 OIDC 自动发布。"
+            exit 1
+          fi
 
       - name: 提交 npm 待审批（mode=stage，可创建新包）
         if: steps.exists.outputs.value == 'false' && inputs.mode == 'stage'
         run: |
-          npm stage publish
-          echo "::notice::已提交待审批：npmjs.com → 包页 → Staged Packages → Approve（需 2FA）"
+          if ! npm stage publish; then
+            echo "::error::npm stage publish 失败。检查 NPM_TOKEN 是否为 granular token（Packages 选 All packages，Read and write）。"
+            exit 1
+          fi
+          npm stage list || true
+          echo "::notice::已提交待审批：打开 https://www.npmjs.com/package/${{ steps.meta.outputs.name }} → Staged Packages → Approve（需 2FA）"
 
       - name: 发布预演（mode=dry-run）
         if: inputs.mode == 'dry-run'
