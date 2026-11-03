@@ -6,6 +6,9 @@ node_modules/
 .refs-*/
 .tools/
 
+# 本地 npm 凭据
+.npmrc
+
 # 日志与临时文件
 *.log
 .DS_Store

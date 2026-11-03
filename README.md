@@ -579,7 +579,9 @@ npm version patch -m "chore: release v%s"   # 或 minor / major
 git push origin main --follow-tags
 ```
 
-首次发布需要先手动 bootstrap 一次，并在 npmjs.com 上为本仓库配置 Trusted Publisher（工作流文件名填 `publish.yml）；
-手动触发预演、版本策略、回滚与排错见 [`docs/publishing.md`](./docs/publishing.md)。
+本机**不需要** `npm login` / `npm publish`：首次建包也能在工作流里完成——在 npmjs.com 生成一个 granular token 存为仓库 secret `NPM_TOKEN`，
+然后 Actions → Publish to npm → Run workflow（mode=`publish`）；首发成功后配置 Trusted Publisher（工作流文件名填 `publish.yml`）并删除该 token。
+之后 tag 推送即全自动；工作流还支持 mode=`stage`（提交 npm 待审批，可创建新包）与 mode=`dry-run`（只预演）。
+完整步骤、版本策略、回滚与排错见 [`docs/publishing.md`](./docs/publishing.md)。
 
 [![Publish to npm](https://github.com/FantasyStarry/dsh-todo-time-log/actions/workflows/publish.yml/badge.svg)](https://github.com/FantasyStarry/dsh-todo-time-log/actions/workflows/publish.yml)

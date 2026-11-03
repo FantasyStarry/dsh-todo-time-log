@@ -1,148 +1,133 @@
 # 发布流程（npm）
 
 本仓库通过 GitHub Actions 自动发布 npm 包 **dsh-todo-time-log**（unscoped、公开）。
-工作流文件：[.github/workflows/publish.yml](../.github/workflows/publish.yml)。
-鉴权使用 **npm 可信发布（Trusted Publishing / OIDC）**，仓库里不需要保存任何 npm token。
+工作流：[.github/workflows/publish.yml](../.github/workflows/publish.yml)。
+日常发布使用 **npm 可信发布（Trusted Publishing / OIDC）**，仓库里不需要长期保存任何 npm token。
 
-## 0. 触发方式与流水线
+## 0. 结论：能不能跳过本地 `npm login` + `npm publish`？
+
+**能。** 首发和日常发布都可以在 Actions 里跑完，本机不需要 `npm login`/`npm publish`。
+唯一无法省掉的是**一次性的 npm 账号授权**（在浏览器里做，1 分钟）：
+
+| 需要人做的事 | 在哪做 | 为什么不能自动化 |
+| --- | --- | --- |
+| 生成 granular access token（勾 Bypass 2FA） | npmjs.com（浏览器） | 这是账号身份授权，CI 不能给自己发权限 |
+| 把 token 存为仓库 secret `NPM_TOKEN` | GitHub 仓库设置（或 `gh secret set`） | 同上 |
+| 首次发布后：配置 Trusted Publisher、删掉 token | npmjs.com + GitHub 设置 | 同上（一次即可，之后全自动） |
+
+> 为什么首发不能纯 OIDC：Trusted Publisher 是绑定在**已存在**的包上的，
+> 而新包名的创建本身需要一次人工授权（npm 2026-10 起新包也可以走 `npm stage publish` 创建，但仍需 token 或本地会话）。
+
+## 1. 触发方式与流水线
 
 | 触发 | 行为 |
 | --- | --- |
-| push tag `v*.*.*` | 校验 tag ↔ `package.json` 版本 → check/test/audit → 打包预演 → npm public（provenance）→ 创建 GitHub Release |
-| `workflow_dispatch`（dry_run=true，默认） | 只跑校验并执行 `npm publish --dry-run`，不发布 |
-| `workflow_dispatch`（dry_run=false） | 不走 tag 直接发布当前版本（应急用） |
+| push tag `v*.*.*` | 校验 tag ↔ 版本 → check/test/audit → 打包预演 → `npm publish --provenance`（OIDC）→ 创建 GitHub Release |
+| `workflow_dispatch` + `mode=dry-run`（默认） | 只做 `npm publish --dry-run`，不写 registry |
+| `workflow_dispatch` + `mode=publish` | 直接发布当前版本（有 `NPM_TOKEN` 用令牌，没有则 OIDC）——**首次建包用这个** |
+| `workflow_dispatch` + `mode=stage` | `npm stage publish` 提交待审批（可创建尚不存在的新包；需 npm ≥ 11.15） |
 
-工作流步骤顺序：
+工作流同时做这些防呆：
 
-1. `npm run check` — 六个 lib 文件语法检查
-2. `npm test` — 解析 / 冒烟 / HTTP 三段测试
-3. `npm run audit` — client.js 静态审计 28 项
-4. `npm pack --dry-run` — 预览发布内容（受 `package.json` 的 `files` 白名单约束）
-5. 查询 npm 是否已存在同版本：**已存在则跳过发布**（幂等，便于重跑与补发 Release）
-6. `npm publish --provenance` — 可信发布，npm 页面生成 Provenance 徽章
-7. `gh release create` — 以 tag 名创建 Release，自动生成 release notes
+- tag 必须等于 `v` + `package.json` 版本，否则第一步失败；
+- 用 `npm view name@version` 检查是否已发布，已存在则跳过 publish（可安全重跑）；
+- 存在 `NPM_TOKEN` secret 时自动写入 `.npmrc` 使用令牌，不存在则走 OIDC；
+- `.npmrc` 与 `test/`、`docs/`、`.github/` 都不会进发布包（受 `package.json` 的 `files` 白名单约束）。
 
-发布内容 = `package.json` 的 `files` + `package.json` 本身：`lib/*.js`、`cordis.patch.yml`、`locale/*.json`、`icon.svg`、`README.md`。`test/`、`docs/`、`.github/` 不会进包。
+## 2. 首次发布（只用浏览器，不走本地 CLI）
 
-## 1. 一次性准备
+### 2.1 创建 token
 
-按顺序完成，**第 3 步不能跳过**（Trusted Publisher 只能绑定"已存在"的包）。
+npmjs.com → 头像 → **Access Tokens** → **Generate New Token** → **Granular Access Token**：
 
-### 1.1 确认包可发布
+| 项 | 值 |
+| --- | --- |
+| Token name | `dsh-todo-time-log bootstrap` |
+| Expiration | 7 天（够用，记得删） |
+| Packages and scopes | **All packages** → Read and write（包还不存在，无法只勾它） |
+| **Bypass 2FA** | **勾选**（否则 CI 发布会要求 OTP） |
 
-- `package.json` 不能有 `"private": true`（本仓库已移除）。
-- 包名 `dsh-todo-time-log` 未被占用（当前 registry 上不存在，可直接使用）。
+复制 token（只显示一次）。
 
-### 1.2 首次 bootstrap 发布（本机手动）
+### 2.2 存成仓库 secret
+
+GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret：
+Name `NPM_TOKEN`，Value 粘贴 token。或用 CLI：
 
 ```bash
-npm login                    # 浏览器登录，账号需开启 2FA
-npm pack --dry-run           # 预览将发布的文件
-npm publish                  # 发布当前版本，例如 0.5.0
+gh secret set NPM_TOKEN --repo FantasyStarry/dsh-todo-time-log
 ```
 
-unscoped 包默认就是 public，不需要 `--access public`。
-发布后确认：`npm view dsh-todo-time-log version` 能返回 `0.5.0`。
+### 2.3 跑工作流建包
 
-> 若以后改成 scoped 包名（如 `@fantasystarry/dsh-todo-time-log`），需要 `publish` 时加 `--access public`，
-> 并在 npm 上重新配置 Trusted Publisher。
+Actions → **Publish to npm** → **Run workflow** → `mode` 选 **publish** → Run。
+它会跑完全部测试，然后发布 `0.5.0`。
 
-### 1.3 配置 Trusted Publisher（关键）
+- 成功：`npm view dsh-todo-time-log version` 返回 `0.5.0`，进入第 2.4 步。
+- 失败并提示新包必须走 staged publishing（npm 新策略）：改跑 `mode=stage`，
+  然后 npmjs.com → 包页 → **Staged Packages** → **Approve**（需 2FA）。效果相同。
 
-npmjs.com → 包页面 `dsh-todo-time-log` → **Settings** → **Trusted publishing** → 添加 GitHub Actions：
+### 2.4 收尾（一次性，之后全自动）
 
-| 字段 | 值 |
-| --- | --- |
-| Organization or user | `FantasyStarry` |
-| Repository | `dsh-todo-time-log` |
-| Workflow filename | `publish.yml`（必须与文件名完全一致，含 `.yml`，区分大小写） |
-| Environment | 留空（除非给 job 配了 `environment`） |
+1. npmjs.com → 包页 `dsh-todo-time-log` → **Settings** → **Trusted publishing** → GitHub Actions：
+   - Organization or user：`FantasyStarry`
+   - Repository：`dsh-todo-time-log`
+   - Workflow filename：`publish.yml`（必须完全一致，含后缀、区分大小写）
+   - Environment：留空
+2. **48 小时内**要有一次成功发布来"验证"这个配置，否则配置过期作废（npm 2026-10 新规则）。
+   若配置后暂时没有新版本，可以先跑一次 `mode=publish`（该版本已存在会自动跳过，不算验证），
+   所以更稳妥的做法是：配好后等到下一个版本（`v0.5.1`）发布时完成验证。
+3. 删除 `NPM_TOKEN` secret（GitHub 设置里删），并收回 npm token。
+4. 建议开启 npmjs.com → 包 Settings → Publishing access → **Require 2FA and disallow tokens**。
 
-保存后，工作流里的 `npm publish` 会用 `id-token: write` 换取短期凭证，无需 `NPM_TOKEN`。
-如果仓库 Secrets 里曾经存过 `NPM_TOKEN`，可以删掉。
-
-### 1.4 可选：给发布加人工审批
-
-在 GitHub 仓库 Settings → Environments 新建 `npm-publish`（可加 Required reviewers），
-然后给 workflow 的 job 加上 `environment: npm-publish`，同时 npm 侧 Environment 字段填同名值。
-
-## 2. 日常发版
+## 3. 日常发版（全自动）
 
 ```bash
-# 1) 改版本并打 tag（npm version 会自动 commit + tag）
-npm version patch -m "chore: release v%s"    # 0.5.0 → 0.5.1；也可用 minor / major
-# 2) 推送 commit 与 tag（--follow-tags 只推 annotated tag）
+npm version patch -m "chore: release v%s"   # 0.5.0 → 0.5.1；也可 minor / major
 git push origin main --follow-tags
 ```
 
-推送 tag 后到 Actions 页面确认 `Publish to npm` 变绿，然后：
+tag 推送后：Actions 跑校验 → OIDC 发布（带 provenance）→ 自动建 Release。
+确认：`npm view dsh-todo-time-log version`。
 
-```bash
-npm view dsh-todo-time-log version     # 应为新版本
-npm view dsh-todo-time-log dist.tarball
-```
-
-## 3. 手动触发 / 预演
+## 4. 手动触发 / 预演
 
 Actions → **Publish to npm** → **Run workflow**：
 
-- `dry_run = true`（默认）：完整校验 + `npm publish --dry-run`，只打印将要发布的文件，不写 registry。
-- `dry_run = false`：不依赖 tag，直接发布当前 `package.json` 版本（版本已存在时会自动跳过）。
+- `dry-run`：完整校验 + `npm publish --dry-run`，只打印将发布的文件；
+- `publish`：直接发布当前版本（版本已存在自动跳过）；
+- `stage`：提交待审批，npmjs.com 的 Staged Packages 里 Approve 后生效。
 
-## 4. 版本策略
+## 5. 版本策略
 
-- 目前 `0.x`：破坏性变更走 minor（0.5 → 0.6），修复/小功能走 patch。
-- 到 `1.0.0` 后严格遵循 SemVer。
-- **tag 必须等于 `v` + `package.json` 版本**，否则工作流第一步就失败（防呆）。
-- 不要复用已发布过的版本号；也不要"本地 `npm publish` 了但忘了打 tag"。
+- `0.x`：破坏性变更走 minor（0.5 → 0.6），修复/小功能走 patch；到 `1.0.0` 后严格 SemVer。
+- tag 必须等于 `v` + `package.json` 版本。
+- 不要复用已发布过的版本号。
 
-## 5. 回滚 / 撤销
+## 6. 回滚 / 撤销
 
 ```bash
-# 发布 72 小时内可整版撤回（之后版本号也不能再用）
+# 72 小时内可整版撤回（之后该版本号也不能再用）
 npm unpublish dsh-todo-time-log@0.5.1
 
-# 超过 72 小时：标记弃用并尽快发修复版
+# 超过 72 小时：标记弃用 + 尽快发修复版
 npm deprecate dsh-todo-time-log@0.5.1 "此版本存在 XXX 问题，请升级到 0.5.2"
 ```
-
-## 6. 备选方案：NPM_TOKEN（不推荐）
-
-如果暂时无法配置 Trusted Publisher，可退回长期 token：
-
-1. npmjs.com → Access Tokens → Generate New Token → **Granular Access Token**：
-   - Packages: 仅 `dsh-todo-time-log`，权限 Read and write
-   - 勾选 **Bypass 2FA**（否则 CI 无法发布）
-2. GitHub 仓库 Settings → Secrets and variables → Actions → 新建 `NPM_TOKEN`。
-3. 工作流 publish 步骤加环境变量，并在 `setup-node` 里加 `registry-url: https://registry.npmjs.org`：
-
-```yaml
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - name: 发布到 npm
-        run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-```
-
-降级点：没有 OIDC 的"短期凭证"安全性，token 有泄露与轮换成本；provenance 仍可用（需要 `id-token: write`）。
 
 ## 7. 常见问题
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
-| `404 Not Found - PUT` | Trusted Publisher 没配，或 owner / repo / workflow 文件名与 npm 上不一致 |
-| `ENEEDAUTH` | 工作流缺 `id-token: write`；或用了 token 但 `NPM_TOKEN` 未配 / 已过期 |
-| `E409` / `cannot publish over existing version` | 版本号已存在 → 改版本号重发，不要删除重发同一号 |
-| provenance 生成失败 | 仓库必须 public；job 必须 `id-token: write`；`repository` 字段与真实仓库一致 |
-| 工作流报 tag 与版本不一致 | 先把错误 tag 删掉重打：`git push origin :v0.5.1`、`git tag -d v0.5.1` |
-| `npm publish` 本地报 `provenance` 相关错误 | 本机发布不要带 `--provenance`（本地无 OIDC） |
-| npm 版本过低报可信发布不支持 | 需要 npm ≥ 11.5.1；工作流用 Node 24 已满足 |
+| `404 Not Found - PUT` | 包还不存在（走 2.3 的 bootstrap）或 Trusted Publisher 的 owner/repo/workflow 名不一致 |
+| 发布时报需要 2FA / OTP | 用的 token 没勾 **Bypass 2FA**；或本机 `npm publish` 未通过 OTP |
+| `ENEEDAUTH` | 既没有 `NPM_TOKEN`，job 又缺 `id-token: write` |
+| `E409` / cannot publish over existing version | 版本号已存在 → 改版本号，不要重发同一号 |
+| 新包直接被拒绝、提示 staged publishing | 用 `mode=stage` + npmjs.com 点 Approve |
+| Trusted Publisher 显示过期/无效 | 配置后 48 小时内没有成功发布 → 删除配置重建 |
+| provenance 生成失败 | 仓库必须 public；job 必须有 `id-token: write`；`repository` 字段与真实仓库一致 |
+| 工作流报 tag 与版本不一致 | 删掉错误 tag 重打：`git push origin :v0.5.1`、`git tag -d v0.5.1` |
 
-## 8. 首次发布与 tag 的关系（重要）
+## 8. 备选：长期 NPM_TOKEN（不推荐）
 
-先 `npm publish` bootstrap 出 `0.5.0`，再配 Trusted Publisher。
-之后给 `0.5.0` 补打 `v0.5.0` tag 也安全：工作流检测到该版本已存在会自动跳过 `npm publish`，
-只创建 GitHub Release。真正的"自动发布"从下一个版本开始（如 `v0.5.1`）。
+若不想配 Trusted Publisher，可以一直用 token 发布（工作流已支持：有 `NPM_TOKEN` 就用它）。
+代价：没有 OIDC 的短期凭证安全性，token 过期/泄露都要人工处理，需要定期轮换。

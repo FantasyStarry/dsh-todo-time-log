@@ -1,10 +1,19 @@
-# 打 tag（v1.2.3）→ 全量校验 → npm publish（OIDC 可信发布）→ GitHub Release
+# 发布到 npm
 #
-# 一次性前置（详见 docs/publishing.md）：
-#   1. 先手动 bootstrap 发布一次（Trusted Publisher 只能给已存在的包配置）
-#   2. npmjs.com → 包 Settings → Trusted publishing 添加：
-#      GitHub Actions / FantasyStarry / dsh-todo-time-log / publish.yml
-#   3. 不需要 NPM_TOKEN 密钥（本工作流用 id-token 换取短期发布凭证）
+# 触发：
+#   - push tag v*.*.*        → 校验 + 全量测试 + npm publish（OIDC 可信发布）
+#   - workflow_dispatch      → 手动选择 mode：
+#       dry-run（默认）      → 只做 npm publish --dry-run
+#       publish             → 直接发布当前版本（有 NPM_TOKEN 则用令牌，否则 OIDC）
+#       stage               → npm stage publish 提交待审批（可创建尚不存在的新包）
+#
+# 首次发布（包还不在 registry 上）：
+#   1. npmjs.com → Access Tokens → Granular Access Token（勾 Bypass 2FA）
+#   2. GitHub 仓库 Settings → Secrets → Actions → 新建 NPM_TOKEN
+#   3. Actions → Publish to npm → Run workflow → mode = publish
+#   4. 发布成功后：npmjs.com 配置 Trusted Publisher（publish.yml）→ 删除 NPM_TOKEN
+#   之后 tag 推送即全自动，无需任何 token。
+# 详见 docs/publishing.md
 name: Publish to npm
 
 on:
@@ -13,14 +22,18 @@ on:
       - "v*.*.*"
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "只做打包预演（npm publish --dry-run），不真正发布"
-        type: boolean
-        default: true
+      mode:
+        description: "dry-run=只预演 / publish=直接发布 / stage=提交待审批（首次建包可用）"
+        type: choice
+        options:
+          - dry-run
+          - publish
+          - stage
+        default: dry-run
 
 permissions:
   contents: write # 创建 GitHub Release
-  id-token: write # npm 可信发布（OIDC）
+  id-token: write # npm 可信发布（OIDC）/ provenance 签名
 
 concurrency:
   group: npm-publish
@@ -34,10 +47,14 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 安装 Node.js（npm ≥ 11.5.1 才支持可信发布）
+      - name: 安装 Node.js（OIDC 可信发布需 npm ≥ 11.5.1）
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: 升级 npm（staged publishing 需要 ≥ 11.15）
+        if: inputs.mode == 'stage'
+        run: npm install -g npm@latest && npm --version
 
       - name: 读取包名与版本，校验 tag 与版本一致
         id: meta
@@ -57,9 +74,20 @@ jobs:
         run: |
           if npm view "${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" version >/dev/null 2>&1; then
             echo "value=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }} 已发布，跳过 npm publish"
+            echo "::notice::${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }} 已发布，跳过发布步骤"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 配置 npm 令牌（存在 NPM_TOKEN secret 时用于首次发布）
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > .npmrc
+            echo "::notice::检测到 NPM_TOKEN，使用令牌认证"
+          else
+            echo "::notice::未设置 NPM_TOKEN，使用 OIDC 可信发布"
           fi
 
       - name: 语法检查
@@ -74,15 +102,19 @@ jobs:
       - name: 打包预演（确认发布内容）
         run: npm pack --dry-run
 
-      - name: 发布到 npm（可信发布 + provenance）
-        if: steps.exists.outputs.value == 'false' && inputs.dry_run != true
+      - name: 发布到 npm（tag 触发，或 mode=publish）
+        if: steps.exists.outputs.value == 'false' && (github.event_name == 'push' || inputs.mode == 'publish')
         run: npm publish --provenance
-        env:
-          NPM_CONFIG_PROVENANCE: "true"
 
-      - name: 发布预演（workflow_dispatch 且 dry_run = true）
-        if: inputs.dry_run == true
-        run: npm publish --dry-run --provenance
+      - name: 提交 npm 待审批（mode=stage，可创建新包）
+        if: steps.exists.outputs.value == 'false' && inputs.mode == 'stage'
+        run: |
+          npm stage publish
+          echo "::notice::已提交待审批：npmjs.com → 包页 → Staged Packages → Approve（需 2FA）"
+
+      - name: 发布预演（mode=dry-run）
+        if: inputs.mode == 'dry-run'
+        run: npm publish --dry-run
 
       - name: 创建 GitHub Release
         if: startsWith(github.ref, 'refs/tags/') && steps.exists.outputs.value == 'false'
