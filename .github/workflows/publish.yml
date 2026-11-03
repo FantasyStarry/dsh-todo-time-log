@@ -127,7 +127,7 @@ jobs:
         run: npm publish --dry-run
 
       - name: 创建 GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') && steps.exists.outputs.value == 'false'
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
