@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Todo Time Log",
+    "description": "Lists todos and records when each one was created and completed, with local YYYY-MM-DD HH:mm:ss timestamps. Four views (table, board, Gantt, calendar), project categories and workspace file references (@file derives the category), conversational quick-add and a /todo command, plus the todo_time_log agent tool."
+  }
+}

@@ -1,0 +1,10 @@
+# Bundle patch layer for 「待办时间日志」 (dsh-todo-time-log).
+#
+# One row mounts the package entry as the Host half (a plain Cordis plugin that
+# registers the HTTP routes and the `todo_time_log` agent tool). The
+# `dsh.client` section in package.json makes the Web app load `./client` as the
+# browser half, which draws the panel in the `main` slot and its entry in the
+# sidebar.
+- insert:
+    - id: dsh-todo-time-log
+      name: dsh-todo-time-log
