@@ -286,6 +286,63 @@ try {
   const reloadedList = await reloaded.list({});
   check('persisted state readable', reloadedList.stats.total === 0, reloadedList.stats);
   await reloaded.dispose();
+
+  // ---- host admission (connection.requestRejection) ----
+  // The production wiring passes `authorize`; every route must be refused
+  // before it reads or writes anything when the host rejects the caller.
+  async function withAuthorize(authorize, run) {
+    const guarded = http.createServer(createHttpHandler(store, { authorize }));
+    await new Promise((resolve) => guarded.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${guarded.address().port}${ROUTE_PREFIX}`;
+    try {
+      await run(base);
+    } finally {
+      await new Promise((resolve) => guarded.close(resolve));
+    }
+  }
+
+  await withAuthorize(() => 401, async (base) => {
+    for (const [method, action] of [['GET', 'health'], ['POST', 'list'], ['POST', 'create']]) {
+      const response = await fetch(`${base}/${action}`, {
+        method,
+        ...(method === 'POST'
+          ? { headers: { 'content-type': 'application/json' }, body: '{"title":"绕过"}' }
+          : {}),
+      });
+      const body = await response.json();
+      check(`unauthenticated ${method} /${action} -> 401`, response.status === 401, response.status);
+      check(`unauthenticated ${method} /${action} envelope`, body.ok === false && body.error?.code === 'UNAUTHORIZED', body);
+    }
+  });
+
+  await withAuthorize(() => 403, async (base) => {
+    const response = await fetch(`${base}/health`);
+    const body = await response.json();
+    check('untrusted origin -> 403', response.status === 403, response.status);
+    check('untrusted origin code', body.error?.code === 'FORBIDDEN', body);
+  });
+
+  // A throwing admission check must reject rather than fall through.
+  await withAuthorize(() => { throw new Error('connection unavailable'); }, async (base) => {
+    const response = await fetch(`${base}/list`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    check('failing admission -> 403', response.status === 403, response.status);
+  });
+
+  // Admitted callers keep the normal contract.
+  await withAuthorize(() => undefined, async (base) => {
+    const response = await fetch(`${base}/health`);
+    check('admitted caller -> 200', response.status === 200, response.status);
+  });
+
+  // Rejected requests must not have written anything.
+  const untouched = new TodoStore({ dataFile: path.join(dir, 'todos.json') });
+  await untouched.load();
+  check('rejected requests wrote nothing', untouched.size === 0, untouched.size);
+  await untouched.dispose();
 } finally {
   await new Promise((resolve) => server.close(resolve));
   await store.dispose();

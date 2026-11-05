@@ -1031,3 +1031,29 @@ requirements {"engines.dsh":">=0.2.0-rc.2 <0.2.2-0"}
 6. **plugin_manager** 不再对本插件报 `incompatible-version`；同一 profile 中仍报该错的是**另一个仓库**的 `dsh-ops@0.4.4`（同样声明旧上界，需其作者发布新版本）。
 
 **至此用户报告的 incompatible 问题已在当前 DSH 0.2.2-rc.1 上闭环消除，插件恢复可用。** 发布到 npm（0.5.2）需另行打 tag 推送，由仓库 Actions 的 OIDC 流程完成。
+
+---
+
+## 25. 十期：插件市场收录准备 —— 宿主认证加固（0.6.0）
+
+**背景**：准备把插件提交到社区插件市场（[开放插件市场 dshopen.org](https://dshopen.org)，索引格式 1）。其[贡献指南](https://github.com/polang233/dsh-plugin-index/blob/main/.github/CONTRIBUTING.md)把「**通过 `webServer` 注册的本机接口没有接入宿主认证**」列为最常见退回原因：
+
+> 插件通过 `webServer` 注册的接口，请用 `connection.requestRejection(req)` 做准入；拿不到 `connection` 或抛错时直接拒绝，不要退回到只检查 Host、Origin 或回环地址。
+
+本插件此前正好命中这一条：`/api/dsh-todo-time-log/*` 可读写待办文件、枚举工作区目录与 live 会话，但未做宿主认证。**已在提交前修复**：
+
+| 项 | 内容 |
+| --- | --- |
+| 实现 | `createHttpHandler(store, { authorize })`：handler 在解析路由**之前**调用 `authorize(req)`；返回 `401/403` 即拒绝并回统一 JSON 错误（`UNAUTHORIZED` / `FORBIDDEN`），返回 falsy 才继续 |
+| 生产接线 | `apply()` 里 `authorize` 读取 `ctx.get('connection')`；服务缺失或抛错一律按 `403` 拒绝（不退化为只查 Host/Origin） |
+| 封装 | 直接构造 handler 的单元测试不传 `authorize`，行为不变；生产路径必然传入 |
+
+**验证**：
+
+| 证据 | 结果 |
+| --- | --- |
+| `node --test test/http.test.mjs`（新增 11 条） | **77/77**：无 cookie 的 `GET /health`、`POST /list`、`POST /create` → **401 `UNAUTHORIZED`**；不可信来源 → **403 `FORBIDDEN`**；`authorize` 抛错 → **403**；放行时 → 200；**被拒请求未写入任何数据** |
+| 真实 DSH 0.2.2-rc.1（隔离 `DSH_HOME`，端口 51962） | **8/8**：无 cookie 请求 401；`GET /?token=` 换到登录 cookie（303）；带 cookie 的 `GET /health` 200、`POST /create` 200（中文原样）、`POST /list` 命中、`POST /delete` 200；带 cookie 但伪造 `Origin: https://evil.example` → **403** |
+| `npm run verify`（0.6.0） | check / eslint / tsc / build / **342 tests** / audit 28/28 全通过 |
+
+**兼容性影响**：HTTP 契约由「匿名可用」变为「须经宿主认证」。浏览器内的面板请求同源自动携带 cookie，无需改动；脚本直接调接口需先 `GET /?token=<启动 URL 里的 token>` 取 cookie。属安全加固，故版本升 **0.6.0**。

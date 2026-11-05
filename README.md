@@ -9,7 +9,7 @@
 | 中文显示名 | 待办时间日志 |
 | 短别名 | `todo-time-log`、`ttl`（文档与工具前缀用；dsh 的 Entry / Slot / Tool 标识统一用包名） |
 | 数据文件 | `<DSH_PROFILE_DIR 或 ~/.dsh>/todo-time-log/todos.json`（可用环境变量或行配置覆盖） |
-| HTTP 接口 | `POST /api/dsh-todo-time-log/*` |
+| HTTP 接口 | `POST /api/dsh-todo-time-log/*`（**经宿主认证**：每条请求先过 `connection.requestRejection()`，无登录 cookie 返回 401、跨站/不可信来源返回 403） |
 | 智能体工具 | `todo_time_log`（action = list / get / create / complete / uncomplete / update / delete / health） |
 | UI 位置 | 中央面板 `main`（key = `dsh-todo-time-log`）+ 侧边栏图标 `sidebar.panellist`（id 同名，点击打开面板） |
 | 视图 | 四视图：**表格 / 看板 / 甘特图 / 日历**（甘特条 = 创建 → 完成，未完成延伸到「现在」；四视图内均可完成/编辑/删除） |
@@ -188,7 +188,15 @@ export function apply(ctx, config = {}) {
 
   mountOn(ctx, ['webServer'], (scope) => {        // 路由：供 UI 调用
     scope.effect(() => scope.webServer.register({
-      kind: 'prefix', path: ROUTE_PREFIX, handler: createHttpHandler(store),
+      kind: 'prefix', path: ROUTE_PREFIX,
+      handler: createHttpHandler(store, {
+        // 宿主认证：connection 缺失或抛错一律拒绝，不退回到 Host/Origin 自检
+        authorize: (req) => {
+          const connection = ctx.get('connection');
+          if (!connection) return 403;
+          return connection.requestRejection(req) ?? undefined;
+        },
+      }),
     }));
   });
 
