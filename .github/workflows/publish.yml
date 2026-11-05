@@ -90,10 +90,18 @@ jobs:
             echo "::notice::未设置 NPM_TOKEN，使用 OIDC 可信发布"
           fi
 
+      - name: 安装依赖（校验/测试需要 devDependencies）
+        run: npm ci
+
       - name: 语法检查
         run: npm run check
 
-      - name: 单元 / 冒烟 / HTTP 测试
+      - name: 构建并校验 client 产物与源码同步
+        run: |
+          npm run build
+          git diff --exit-code -- lib/client.js
+
+      - name: 单元 / 冒烟 / HTTP / UI / 并发测试
         run: npm test
 
       - name: 客户端静态审计

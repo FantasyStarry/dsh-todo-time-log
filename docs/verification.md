@@ -960,3 +960,74 @@ profile 安装   → 符号链接指向工作区，10 文件字节一致
 
 **验证**：`npm run check` 6 文件通过；`npm test` = 49 + 99 + 47；`npm run audit` 全通过（i18n 195 键/语言成对、22 token、147 类名、DOM 规则）；ui-dev shim **325** 条（`/todo …`/`/TODO …`/`/todo @` 通过并恰好 1 次请求；`@`、`写周报 @`、空串、`/todos`、`/todo2 …` 返回 [] 且 0 请求；document/activeElement/textContent 异常安全返回）。
 **未验证（需人工）**：真实平台 `@` 菜单中的分组显隐与选中效果（无浏览器控制），需刷新页面后手测。**另需说明**：「只显示我们的分组」在平台层面不可行——菜单是所有已注册来源的并集，插件只能追加或隐藏自己的分组，无法移除平台的文件/会话来源。
+
+---
+
+## 24. 九期复核：DSH 0.2.2-rc.1 兼容性（0.5.2）
+
+**复核时间**：2026-11-05 08:45–09:15（Asia/Shanghai）。**角色**：Lead + 3 名独立 verifier（Host 契约 / Client 契约 / 真机运行时），三份独立报告互不依赖；Lead 负责元数据修复、文档整合与最终回归。
+
+**问题**：DSH 升级到 0.2.2-rc.1 后，插件 0.5.1 被 profile 启动 preflight 判定 incompatible 并禁用（`plugin_manager` 中 `error.code = incompatible-version`、`rows` 为空），日志为：
+
+```text
+Plugin dsh-todo-time-log@0.5.1 is incompatible with dsh 0.2.2-rc.1:
+requirements {"engines.dsh":">=0.2.0-rc.2 <0.2.2-0"}
+```
+
+**根因（读 DSH 0.2.2-rc.1 源码 `dsh-app-boot/lib/index.js:1094-1144`）**：兼容性判定是 `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`。预发布语义下 `0.2.2-rc.1 > 0.2.2-0`，所以旧上界 `<0.2.2-0` 把 `0.2.2-rc.1` 排除在外；旧范围对 `0.2.1-rc.5` 及更早为 true、对 0.2.2 全系列为 false。
+
+**修复（仅元数据，未改代码）**：
+
+| 文件 | 变更 |
+| --- | --- |
+| `package.json` | `version` 0.5.1 → **0.5.2**；`engines.dsh` 与 `peerDependencies["@deepseek-ai/dsh"]` 改为 **`>=0.2.0-rc.2 <0.2.3-0`**（纳入 0.2.2 预发布/正式版，仍排除 0.2.3 预发布） |
+| `package-lock.json` | 根版本同步 0.5.2（含 `engines.dsh` / peer 声明） |
+| `README.md` | 顶部兼容性行、§4 安装门禁说明、§7 九期记录、§8 tag 示例 |
+
+真实 semver 7.8.6 判定矩阵（`includePrerelease: true`）：旧范围 `0.2.2-rc.1=false`；新范围 `0.2.1-rc.5 / 0.2.2-alpha.3 / 0.2.2-rc.1 / 0.2.2 = true`，`0.2.3-0 / 0.2.3-rc.1 / 0.3.0 = false`；当前 manifest `unmetRequirements = {}`。
+
+### 24.1 Host 契约审计 — 0 BREAK / 1 RISK(低) / 8 PASS
+
+- 9 个集成点逐一用「运行中 0.2.2-rc.1 的 `cordis_inspect` host/Service **实时契约** + `.tools/dsh-0.2.2` 解包源码」双向核对：`ctx.inject/effect/logger`、`webServer.register`（仍是 Node `(req,res)` 的 prefix 路由，匹配 `path===prefix || startsWith(prefix+'/')`）、`tools.register`（ToolDefinition 旧字段未改名/未收紧，新增回调均可选）、`commands.register`（`rawInput`/`attachments`/`{kind:'success'|'error', text}` 兼容）、`sessions.list()/eventAt/header.{cwd,origin,createdAt}`、`workspaceRegistry.list()`、`fs.resolve/listDir`。
+- 0.2.2 点名的三项破坏性变更（`tools.resolve/executable` 与提示词组装接口、Session Projection 异步注册、Cordis Timer 返回值）本插件 grep 零命中，均未使用。
+- **执行级探针**：用真实 DSH 的 `assertSupportedJsonSchema` / `validateJsonSchemaValue` / `snapshotJsonValue` 跑插件真实 Host 代码，**47/47** 通过（10 个 action 返回值全部 lossless JSON 且过 output schema、`render` 返回合法 text block；HTTP handler 200/404/405/400 均被真实路由接受）。
+- **唯一 RISK（低，非阻断）**：0.2.2 源码已把 `Session.eventAt()` 等同步 Session 读标 `@deprecated`（仍完整可用；插件有 `header.createdAt` 兜底，最坏只退化「最近活跃会话」排序）。后续可在 DSH 正式移除同步读时再整改。
+
+### 24.2 Client 契约审计 — 6/6 PASS / 0 RISK / 0 BREAK
+
+- `__ModuleLoader__.load({id, factory(require)})`、`{inject, apply}` 模块对象、`require('react')` seed 在 0.2.2 不变（`dsh-client-modules`；`react` 仍在 frontend static seed 表）。
+- `main`（keyed，注册参数仅 `key`）与 `sidebar.panellist`（list，`id/order/label`）在 0.2.2 SlotMap（117 槽）中存在；与官方 `schedule` / `plugin-manager` 的注册逐字同构。
+- `inputTriggers.registerSource` / `candidates(session,{query,signal})` / `onPick({candidate})→{text}` / `order` / `showGroupTitle` / `section`：0.2.1-rc.5 → 0.2.2 逐行 diff 仅新增 6 语言 i18n 字典 + 1 行 CSS，契约零变化。
+- 客户端 `sessions.list.getSnapshot().byId[id].cwd` 仍被 0.2.2 官方 `ui-reference` 同型使用；插件 29 个主题 token 在 0.2.2 theme CSS 中 **29/29** 有定义。
+- Lead 补充实时核对（client inspect）：`main` / `sidebar.panellist` 槽 available 且参数结构与插件注册一致；当前页面 occupants 暂无本插件（因运行中的 desktop 尚需重装/重启，属预期）。
+- 构建产物：`npm run build` 前后 SHA256 均为 `C9829229…FDDE64`（232659 B）→ 字节级可复现且与 `src/client` 同步；`npm run audit` 28/28、`test/ui/panel.test.mjs` 4/4、`tsc` / `node --check` 通过。
+
+### 24.3 真实 0.2.2-rc.1 端到端（隔离 DSH_HOME）— 27/27 PASS
+
+- 环境：dsh CLI 0.2.2-rc.1；隔离 `DSH_HOME=.tools/verify/home`（真实 desktop profile 未重启、未改动）；`dsh plugin --profile verify add link:D:/code/dsh-todo-time-log` **exit 0**（0.5.2 被接受）。
+- 启动无门禁拒绝（stderr 无 `incompatible` / `disabling profile plugin`）；插件 5 条 logger.info 实测：`routes mounted at /api/dsh-todo-time-log`、`tool registered: todo_time_log`、`command registered: /todo`、`data file`、`workspace root`；宿主内注册表探测 `tools.knownNames` 含 `todo_time_log`、commands 含 `todo`。
+- **HTTP E2E 25/25**：health 200、中文 create（project/priority/type/files）、list+projects、complete、重复 complete 409 `ALREADY_COMPLETED`、uncomplete、update、delete、未知 id 404、坏 JSON 400；数据文件 JSON 合法、中文原样、`createdAt` 为 ISO-8601 UTC（本地时间由 409 消息 `完成时间 2026-11-05 09:00:34` 对 `01:00:34Z` 实测证明）。
+- **整机重启后持久化 6/6**：重启后 list 仍含数据，中文与时间字段保持。
+- **Client 注入**：`GET /` 的 `__DSH_BOOT__` 含插件条目（`{"id":"dsh-todo-time-log","url":"plugins/??dsh-todo-time-log/client.js&rev=..."}`），该 client 产物 GET 200（232735 B）且含 `__ModuleLoader__`。
+- **反证**：复制同一插件、仅回退 3 个版本字段（version / engines.dsh / peer）：`dsh plugin add` 被 install preflight 拒绝（exit 1，`nothing was installed`）；在隔离 profile 手工 junction 该副本后启动，stderr 出现 `skipping profile bundle "dsh-todo-time-log": ... incompatible with dsh 0.2.2-rc.1`，插件路由全 404（与未知路由基线一致）、index 不含插件条目。→ **新范围放行 / 旧范围拒绝的因果成立**。
+
+### 24.4 最终回归与结论
+
+- `npm run verify`（0.5.2）：check / eslint / tsc / build / **331 tests** / audit **28/28** 全通过；`lib/client.js` 与 `src/client` 同步。
+- **结论：0.5.2 与 DSH 0.2.2-rc.1 兼容，可在 desktop profile 重装启用；代码无需为 0.2.2 改动。**
+- 未验证：浏览器像素级 UI 与真实模型回合调用 `todo_time_log`（隔离 profile 无模型凭据；工具注册由宿主内注册表探测证明，业务路径由 HTTP E2E 全量覆盖）。
+- 遗留（非本仓库）：同 profile 的 `dsh-ops@0.4.4` 也声明旧上界 `<0.2.2-0`，会被 0.2.2-rc.1 同样禁用，需其作者发布兼容版本；`Session.eventAt` 的 deprecated 去留见 §24.1 RISK。
+- 本轮三份独立验证原始报告（仅本地、被 `.gitignore` 的 `.tools/` 忽略）：`.tools/audit/host-0.2.2.md`、`.tools/audit/client-0.2.2.md`、`.tools/verify/0.2.2-report.md`；原始日志在 `.tools/verify/logs/`。
+
+### 24.5 真实 desktop profile 重装与 live 复验（Lead，09:15–09:25）
+
+按 README §4 的流程在运行中的 desktop profile 上执行「卸载后重新安装兼容版本」：
+
+1. `plugin_manager action=remove_bundle target=dsh-todo-time-log` → `application: applied`；
+2. `plugin_manager action=install_bundle target=link:D:/code/dsh-todo-time-log` → `application: applied`、`bundle: dsh-todo-time-log`、`version: 0.5.2`、`warnings: []`，HMR 直接热加载（**无需重启 DSH、无需刷新页面**）；pnpm 对 link 依赖的 peer 提示（`The linked in dependency will not resolve the peer dependencies`）属正常提示——DSH 在包清单存在 `engines.dsh` 时以它单独判定、忽略 peer，不影响加载。
+3. **Host live**：运行中会话收到动态工具 schema 更新，`todo_time_log` 可实际调用；`action=list` 返回用户既有 12 条待办（中文标题、分类、优先级、本地时间格式均正常，数据文件 `C:\Users\LeoMa\.dsh\todo-time-log\todos.json` 为原有数据，未被改动）。
+4. **HTTP live**：`GET http://127.0.0.1:51204/api/dsh-todo-time-log/health` → `ok: true`、`loaded: true`、`count: 12`；`POST /list` → 12 条 + `stats`/`projects`/`timeFormat` 正常。
+5. **Client live**（client inspect 实时）：`main` 槽新增 occupant `key=dsh-todo-time-log, active=true`；`sidebar.panellist` 槽新增 `id=dsh-todo-time-log, order=30, active=true` → Client 半亦热加载成功。
+6. **plugin_manager** 不再对本插件报 `incompatible-version`；同一 profile 中仍报该错的是**另一个仓库**的 `dsh-ops@0.4.4`（同样声明旧上界，需其作者发布新版本）。
+
+**至此用户报告的 incompatible 问题已在当前 DSH 0.2.2-rc.1 上闭环消除，插件恢复可用。** 发布到 npm（0.5.2）需另行打 tag 推送，由仓库 Actions 的 OIDC 流程完成。

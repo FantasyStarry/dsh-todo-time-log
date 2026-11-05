@@ -9,10 +9,12 @@ const check = (name, ok, detail) => {
 };
 
 // --- locate and evaluate the I18N object literal -------------------------
-const marker = 'const I18N = ';
-const start = src.indexOf(marker);
+// 产物由 esbuild 打包（IIFE），顶层 const 可能变成 var；这里只适配声明形态，
+// 审计语义不变（仍然是找到 `I18N = <对象字面量>` 并求值）。
+const markerMatch = /(?:const|var|let)\s+I18N = /.exec(src);
+const start = markerMatch === null ? -1 : markerMatch.index;
 check('I18N object found', start >= 0);
-const literalStart = start + marker.length;
+const literalStart = markerMatch === null ? 0 : start + markerMatch[0].length;
 let depth = 0;
 let inString = null;
 let escaped = false;
@@ -60,14 +62,15 @@ check('placeholders match between languages', placeholderDiff.length === 0, plac
 // resolved through t(option.labelKey)), so "used" means the literal appears
 // anywhere outside the I18N dictionary itself.
 const usageSource = src.slice(0, literalStart) + src.slice(end);
-const literalCalls = new Set([...src.matchAll(/\bt\(\s*'([^']+)'/g)].map((m) => m[1]));
+const literalCalls = new Set([...src.matchAll(/\bt\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]));
 const undeclared = [...literalCalls].filter((k) => !(k in I18N.zh));
 const unused = zhKeys.filter((k) => !usageSource.includes(`'${k}'`) && !usageSource.includes(`"${k}"`));
 check('no undeclared key used', undeclared.length === 0, undeclared);
 check('no unused declared key', unused.length === 0, unused);
 
 // --- forbidden / required API surface -----------------------------------
-check("only require('react')", [...src.matchAll(/require\(([^)]*)\)/g)].every((m) => m[1].trim() === "'react'"));
+// esbuild 会把 factory 的 require 参数重命名（require -> require2），只适配名字。
+check("only require('react')", [...src.matchAll(/require\d*\(([^)]*)\)/g)].every((m) => /^['"]react['"]$/.test(m[1].trim())));
 // One documented exception: the @ menu source may read the active composer text to
 // decide whether it belongs to a `/todo` command line. It must be a read-only
 // `document.activeElement` lookup, confined to a single helper, with no writes.
@@ -87,31 +90,31 @@ check('no rgb()/hsl() colors', !/\brgba?\(|\bhsla?\(/.test(src));
 
 const tokens = [...new Set([...src.matchAll(/var\((--dsw-alias-[a-z0-9-]+)\)/g)].map((m) => m[1]))];
 check('uses theme alias tokens', tokens.length >= 18, tokens.length);
-const classNames = [...new Set([...src.matchAll(/className:\s*'([^']+)'/g)].flatMap((m) => m[1].split(/\s+/)))];
+const classNames = [...new Set([...src.matchAll(/className:\s*['"]([^'"]+)['"]/g)].flatMap((m) => m[1].split(/\s+/)))];
 const badClass = classNames.filter((name) => name !== '' && !name.startsWith('ttl-'));
 check('all class names use ttl- prefix', badClass.length === 0, badClass.slice(0, 10));
 
 // --- four views present --------------------------------------------------
 for (const view of ['table', 'board', 'gantt', 'calendar']) {
-  check(`view "${view}" wired`, new RegExp(`'${view}'`).test(src));
+  check(`view "${view}" wired`, new RegExp(`['"]${view}['"]`).test(src));
 }
 check(
   'renderers defined',
-  /const renderTableView\s*=/.test(src)
-    && /const pushTableRow\s*=/.test(src)
-    && /const renderBoardView\s*=/.test(src)
-    && /const renderCalendarView\s*=/.test(src)
+  /(?:const|var|let)\s+renderTableView\s*=/.test(src)
+    && /(?:const|var|let)\s+pushTableRow\s*=/.test(src)
+    && /(?:const|var|let)\s+renderBoardView\s*=/.test(src)
+    && /(?:const|var|let)\s+renderCalendarView\s*=/.test(src)
     && /function boardColumns\(/.test(src)
     && /function buildCalendarCells\(/.test(src)
     && /function GanttView\(/.test(src),
 );
-check('calendar uses a 6x7 grid', /42/.test(src) && /function buildCalendarCells|const buildCalendarCells/.test(src));
+check('calendar uses a 6x7 grid', /42/.test(src) && /function buildCalendarCells|(?:const|var|let) buildCalendarCells/.test(src));
 
 // module format + slot registration
 check('module loader wrapper', /window\.__ModuleLoader__\.load\(\{/.test(src));
-check("factory declares id 'dsh-todo-time-log'", /id:\s*'dsh-todo-time-log'/.test(src));
-check('registers main slot', /slots\.inject\('main'/.test(src));
-check('registers sidebar.panellist slot', /slots\.inject\('sidebar\.panellist'/.test(src));
+check("factory declares id 'dsh-todo-time-log'", /id:\s*['"]dsh-todo-time-log['"]/.test(src));
+check('registers main slot', /slots\.inject\(\s*['"]main['"]/.test(src));
+check('registers sidebar.panellist slot', /slots\.inject\(\s*['"]sidebar\.panellist['"]/.test(src));
 
 console.log(`\ni18n keys per language: ${zhKeys.length}; alias tokens: ${tokens.length}; class names: ${classNames.length}`);
 if (failures.length > 0) {

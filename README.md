@@ -5,6 +5,7 @@
 | 项 | 值 |
 | --- | --- |
 | 插件 ID / 包名 | `dsh-todo-time-log` |
+| 兼容性 | DSH `>=0.2.0-rc.2 <0.2.3-0`（`engines.dsh` 声明；已在 DSH **0.2.2-rc.1** 真机验证，见 §7 九期记录） |
 | 中文显示名 | 待办时间日志 |
 | 短别名 | `todo-time-log`、`ttl`（文档与工具前缀用；dsh 的 Entry / Slot / Tool 标识统一用包名） |
 | 数据文件 | `<DSH_PROFILE_DIR 或 ~/.dsh>/todo-time-log/todos.json`（可用环境变量或行配置覆盖） |
@@ -32,17 +33,33 @@ dsh-todo-time-log/
 ├── locale/
 │   ├── zh.json             # 显示名与描述（中文）
 │   └── en.json             # 显示名与描述（英文）
+├── src/client/             # ★ Client 半源码（ES 模块，npm run build 用 esbuild 打包）
+│   ├── index.js            # 入口：window.__ModuleLoader__.load({ id, factory })
+│   ├── app.js              # 模块对象：main + sidebar.panellist 槽位注册
+│   ├── panel.js            # 面板主体：状态 / 请求 / 交互（不含四个视图实现）
+│   ├── views/              # table / board / gantt / calendar 四视图
+│   ├── widgets.js          # 小组件 / 图标 / 对话录入等
+│   ├── detail.js           # 详情区
+│   ├── helpers.js          # 时间 / 格式化 / 甘特几何等纯函数
+│   ├── i18n.js             # zh / en 文案字典
+│   ├── styles.js           # CSS（--dsw-alias-* 主题 token）
+│   ├── sources.js          # /todo 输入触发来源（@ 菜单）
+│   └── runtime.js          # React 注入层（factory 里 setReact）
+├── scripts/
+│   └── build-client.mjs    # esbuild 打包脚本：src/client/ → lib/client.js
 ├── lib/
 │   ├── index.js            # ★ Host 半：apply / inject / 单一业务入口 / HTTP 路由 / 智能体工具
-│   ├── store.js            # ★ 数据模型 + 持久化 + 修复兜底（纯 Node ESM，无 dsh 依赖）
+│   ├── store.js            # ★ 数据模型 + 持久化 + 修复兜底 + 跨进程写入保护（纯 Node ESM，无 dsh 依赖）
 │   ├── time.js             # ★ 时间解析 / 本地格式化 YYYY-MM-DD HH:mm:ss / 空值
 │   ├── parse.js            # ★ 统一自然语言解析（对话面板 / /todo 命令共用）
 │   ├── files.js            # ★ 工作区文件索引（ctx.fs 只读遍历 + 缓存，供 @ 补全）
-│   └── client.js           # ★ Client 半：浏览器模块表工厂，注册 main + sidebar.panellist
+│   └── client.js           # 构建产物（勿手改；由 src/client/ 打包生成，仍是单文件模块表）
 ├── test/
-│   ├── parse.mjs           # 自然语言解析 / 文件路径 / 分类派生（35 断言）
-│   ├── smoke.mjs           # 数据层 / 时间 / 修复 / 分类 / 文件 / 迁移 / 持久化（88 断言）
-│   ├── http.mjs            # 真实 HTTP 路由端到端（30 断言）
+│   ├── parse.test.mjs      # 自然语言解析 / 文件路径 / 分类派生（79 断言，node:test）
+│   ├── smoke.test.mjs      # 数据层 / 时间 / 修复 / 分类 / 文件 / 迁移 / 持久化（174 断言）
+│   ├── http.test.mjs       # 真实 HTTP 路由端到端（66 断言）
+│   ├── store-concurrency.test.mjs  # 跨进程写入：mtime 合并 + 文件锁（8 用例）
+│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（4 用例）
 │   ├── live-utf8.py        # 对运行中实例的真实 UTF-8 往返检查（需 DSH_WEB_URL）
 │   ├── live-projects.py    # 对运行中实例的分类/迁移/筛选真实往返检查
 │   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图）
@@ -54,13 +71,16 @@ dsh-todo-time-log/
 │   │   └── kanban-current-state.md     # 代码/数据/门禁现状、风险 R1–R12、快速改进点 Q1–Q8
 │   ├── design/kanban-plan.md           # 看板改版方案与后续路线（P0 已实现 / P1 / P2）
 │   └── preview/            # 面板渲染预览图（真实 client.js + 主题 token 的静态渲染，见其 README）
+├── eslint.config.js        # ESLint flat config（产物 lib/client.js 不直接 lint）
+├── tsconfig.json           # tsc --checkJs：Host 模块的 JSDoc 类型检查
 ├── .github/workflows/
+│   ├── ci.yml              # push/PR：check / lint / typecheck / build / test / audit（Node 20·22·24 × Linux·Windows）
 │   └── publish.yml         # 打 tag 自动发布 npm（OIDC 可信发布 + 校验 + GitHub Release）
 ├── LICENSE                 # MIT
 └── README.md
 ```
 
-依赖关系：`index.js → store.js → time.js`；`client.js` 只经 HTTP 与 Host 通信，不共享任何模块。这样 Host 与 Client 可以是任意构建产物形态，互不牵连。
+依赖关系：`index.js → store.js → time.js`；`client.js` 只经 HTTP 与 Host 通信，不共享任何模块。这样 Host 与 Client 可以是任意构建产物形态，互不牵连。Client 的源码在 `src/client/`，`npm run build` 打包成单文件 `lib/client.js` 后才是发布物（不打包 react，仍由 factory 的 `require('react')` 注入）。
 
 ---
 
@@ -221,6 +241,8 @@ window.__ModuleLoader__.load({
 
 侧边栏 list 槽的 id 与 `main` keyed 槽的 key 相同，宿主据此把点击事件路由到本面板（与官方 `dsh-context` 插件一致的模式）。面板样式只用 `--dsw-alias-*` 主题 token、类名统一 `ttl-` 前缀，随宿主明暗主题切换。
 
+**源码与产物**：上图的单文件模块表是构建产物 `lib/client.js`，源码在 `src/client/`（入口 / 面板 / 四视图 / 小组件 / i18n / 样式等 ES 模块）。`npm run build` 用 esbuild 打包回同一形态（IIFE、`charset=utf8`、不 minify、不打包 react），发布物与加载方式都不变；`lib/client.js` 不要手改。
+
 ### 3.5 甘特图视图（纯前端计算，不新增接口）
 
 数据仍来自 `POST /list`（固定 `filter=all`、`sortBy=createdAt`、`direction=asc`，并带上当前分类筛选），客户端自己算几何：
@@ -364,6 +386,7 @@ plugin_manager action=install_bundle target=D:\code\dsh-todo-time-log
 ```
 
 - 安装会做包安装（pnpm）、写入 `dsh.bundle.patch` 声明的行并启用 bundle；返回 `application: "applied"` 才算生效。
+- **兼容性门禁**：包清单用 `engines.dsh` 声明支持的 DSH 版本范围（当前 `>=0.2.0-rc.2 <0.2.3-0`）。DSH 在 profile 启动时按「已安装版本的 `engines.dsh`」做 preflight，不满足的插件会被禁用并在 `plugin_manager` 里显示 `incompatible-version`；升级 DSH 后若出现该提示，请安装声明范围覆盖新 DSH 的插件版本（本仓库的兼容性复核与发版流程见 §7 / §8）。
 - 本插件是**本地目录**安装（link 方式），修改 `lib/*.js` 后需要在 Plugin Manager 里把该插件 **关闭再开启**，或重启桌面端，才能让 Host 半加载新的模块实例；Client 半在同一次页面刷新后生效（`dsh.client.immediately`）。
 - 验证入口：Plugin Manager 搜索「待办时间日志」应看到中文标题、描述与图标；左侧导航出现同名入口。
 - 卸载：`plugin_manager action=remove_bundle target=dsh-todo-time-log`（数据文件保留，手动删除即可清空）。
@@ -385,18 +408,27 @@ plugin_manager action=install_bundle target=D:\code\dsh-todo-time-log
 ### 5.1 自动化
 
 ```bash
-npm test          # = node test/parse.mjs && node test/smoke.mjs && node test/http.mjs
+npm run build     # esbuild：src/client/ → lib/client.js（单文件产物）
 npm run check     # 六个 lib 文件（time/parse/files/store/index/client）的 node --check
+npm run lint      # ESLint（flat config；构建产物 lib/client.js 不直接 lint，lint src/client/）
+npm run typecheck # tsc --checkJs：Host 模块的 JSDoc 类型检查
+npm test          # node:test：解析 / 数据层 / HTTP / UI 渲染 / 并发写入（331 用例）
+npm run test:coverage  # 同上 + Node 内置覆盖率（--experimental-test-coverage）
 npm run audit     # client.js 静态审计（28 项）
+npm run verify    # 以上全套（build + check + lint + typecheck + test + audit；prepublishOnly 同）
 ```
 
 覆盖内容：
 
-- `test/parse.mjs`（79 断言）：多条拆分、分类标记最左优先且全部剥离、`@文件` 与 `@分类` 判定、文件路径归一化/拒绝绝对与穿越路径、分类派生规则、**优先级标记**（`!high/!medium/!low`、别名与中文、最左优先、`!important` 不误判）、**类型标记**（`^bug/^feature/...`、中文别名、`类型：bug`/`type:bug`、未知值不误判）、工具 `quick_add` 路径。
-- `test/smoke.mjs`（174 断言）：创建/校验/完成/重复完成/取消完成/重复取消/改名/删除/筛选/排序（含空值置尾）/stats、时间格式与空值、损坏 JSON 备份重建、结构异常 JSON 归档、重复 id 拆分、记录修复（缺 createdAt、完成早于创建、非法状态、非法 priority/type）、修复提示只投递一次、持久化重载、`resolveDataFile` 优先级、分类校验/归一化/筛选/统计/按分类排序（未分类置尾）、**priority/type 校验/归一化/部分更新**、按优先级排序（未设置置尾）、`files` 校验与派生分类、v1–v4→v5 迁移落盘、不支持版本归档。
-- `test/http.mjs`（66 断言）：真实 HTTP 服务上的 prefix 路由、GET health、错误码映射（400/404/405/409）、非法 JSON、数组 body、「HTTP 写入后重新加载可读」，分类/优先级/类型的非法值 400、`sortBy=priority`、只改 priority/type，以及 `/quick-add`（多条 + `#分类` + `@文件` + `!优先级` + `^类型` 标记与表单回退）、`/create` 带 `files`/`priority`/`type`、`/files` 无文件服务时 501。
+- `test/parse.test.mjs`（79 用例）：多条拆分、分类标记最左优先且全部剥离、`@文件` 与 `@分类` 判定、文件路径归一化/拒绝绝对与穿越路径、分类派生规则、**优先级标记**（`!high/!medium/!low`、别名与中文、最左优先、`!important` 不误判）、**类型标记**（`^bug/^feature/...`、中文别名、`类型：bug`/`type:bug`、未知值不误判）、工具 `quick_add` 路径。
+- `test/smoke.test.mjs`（174 用例）：创建/校验/完成/重复完成/取消完成/重复取消/改名/删除/筛选/排序（含空值置尾）/stats、时间格式与空值、损坏 JSON 备份重建、结构异常 JSON 归档、重复 id 拆分、记录修复（缺 createdAt、完成早于创建、非法状态、非法 priority/type）、修复提示只投递一次、持久化重载、`resolveDataFile` 优先级、分类校验/归一化/筛选/统计/按分类排序（未分类置尾）、**priority/type 校验/归一化/部分更新**、按优先级排序（未设置置尾）、`files` 校验与派生分类、v1–v4→v5 迁移落盘、不支持版本归档。
+- `test/http.test.mjs`（66 用例）：真实 HTTP 服务上的 prefix 路由、GET health、错误码映射（400/404/405/409）、非法 JSON、数组 body、「HTTP 写入后重新加载可读」，分类/优先级/类型的非法值 400、`sortBy=priority`、只改 priority/type，以及 `/quick-add`（多条 + `#分类` + `@文件` + `!优先级` + `^类型` 标记与表单回退）、`/create` 带 `files`/`priority`/`type`、`/files` 无文件服务时 501。
+- `test/store-concurrency.test.mjs`（8 用例）：两个实例交错写同一数据文件时 mtime 合并、同 id 取 `updatedAt` 较新者、`Promise.all` 并发写不损坏不丢、tombstone 防删除复活、陈旧锁清理、锁占用超时后下次写入补齐、写前发现损坏数据不重复归档。
+- `test/ui/panel.test.mjs`（4 用例）：jsdom + 真实 React 18 渲染构建产物 `lib/client.js`；覆盖页头/新建框/四视图分段/筛选计数、表格行与时间格式、空态、错误态与重试恢复、看板切换与两列。jsdom 无布局/绘制，视觉回归仍需真机或 Playwright（本轮未接入）。
 - `test/client-audit.mjs`（28 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册。当前口径：**253 键/语言、24 个 alias token、189 个 `ttl-` className**。
 - `test/live-utf8.py` / `test/live-projects.py`：对**运行中实例**的真实往返（中文标题、分类筛选、迁移版本落盘、清理测试数据），需设置 `DSH_WEB_URL`（默认 `http://127.0.0.1:52283`）。
+
+**CI（`.github/workflows/ci.yml`）**：push / PR 触发，矩阵 Node 20 / 22 / 24 × Ubuntu / Windows，依次跑 `check`、`lint`、`typecheck`、`build`、`test`、`audit`；Linux 上额外用 `git diff --exit-code -- lib/client.js` 校验构建产物与源码同步，另有 Node 24 覆盖率 job。发布工作流同样先 `npm ci` 再跑 `build` + 测试 + 审计。
 
 ### 5.2 手工验证（智能体工具）
 
@@ -510,7 +542,7 @@ UI 手测清单（八期：类型标签，**需刷新页面 + 重启插件**）�
 3. **时区（TODO time-zone）**
    展示固定使用 Host/浏览器本地时区。若将来需要「指定 IANA 时区展示」，只需替换 `lib/time.js` 的 `formatLocalDateTime()` 内部实现（`TODO(time-zone)` 已标注），存储格式无需变更。
 4. **Client 文案与 locale 服务（TODO client-locale）**
-   UI 文案集中在 `lib/client.js` 的 `I18N` 字典（zh 默认 / en 兜底），暂未接入宿主 Client locale 服务；槽位注册已带 `label` thunk，后续接入时只需把 `t()` 数据源换成宿主 locale。
+   UI 文案集中在 `src/client/i18n.js` 的 `I18N` 字典（构建后进入 `lib/client.js`；zh 默认 / en 兜底），暂未接入宿主 Client locale 服务；槽位注册已带 `label` thunk，后续接入时只需把 `t()` 数据源换成宿主 locale。
 5. **渲染外观未截图验证**
    已通过 `cordis_inspect_query`（Client Slots）确认 `main` 与 `sidebar.panellist` 的 occupant 均为 `active: true`（说明 `client.js` 已在浏览器里成功加载并注册），但本会话没有浏览器截图能力，**页面视觉外观（间距/主题色/明暗切换）未做像素级验收**，建议首次打开时人工确认。
 6. **对话式录入是启发式解析（TODO chat-parser）**
@@ -564,13 +596,14 @@ UI 手测清单（八期：类型标签，**需刷新页面 + 重启插件**）�
 | 七期 A/B/C 渲染验收 | 同一套 jsdom harness 扩到 **42 条**断言：泳道（≥6 个、折叠/展开）、紧凑密度 class、移到分类写回 + toast + 撤销、`/`/`n`/`f` 快捷键、优先级徽标/卡片 select 写回 + 撤销、新建表单携带优先级、表格排序含优先级；产出 `04`、`12`–`18` 共 11 张看板预览 | PASS（渲染/结构）；真机交互需刷新后人工确认 |
 | 八期 Host 契约（type v5） | `node --check` 3 个 Host 模块通过；`npm test` **79 + 174 + 66** 全绿；v1–v4→v5 迁移、type 校验/归一化/部分更新、quick-add 标记与表单回退均有断言覆盖 | PASS |
 | 八期类型 UI + @ 菜单渲染验收 | jsdom harness **58 条**断言全绿（类型徽标、类型 select 写回 + 撤销、新建表单携带类型、类型筛选、搜索命中类型名、表格类型徽标；`/todo` 草稿的 `@` 菜单含「待办优先级 / 待办类型」候选，选中分别插入 `!high ` / `^bug `，分类候选行为不变）；`npm run audit` **28/28**（i18n **253 键/语言**、24 token、189 类名）；预览 `04`、`12`–`18` 已按类型徽标重拍 | PASS（渲染/结构）；真机需重启插件 + 刷新页面确认 |
+| 九期 DSH 0.2.2-rc.1 兼容性（0.5.2） | 旧 `engines.dsh` 上界 `<0.2.2-0` 会排除预发布 `0.2.2-rc.1`（DSH preflight 用 `semver.satisfies(..., {includePrerelease:true})`），导致插件被禁用；已改为 `>=0.2.0-rc.2 <0.2.3-0` 并升 0.5.2。独立复核：Host 9 个集成点 **0 BREAK / 1 RISK(低) / 8 PASS**（真实 DSH JSON-Schema/工具管线探针 **47/47**）；Client **6/6 PASS**（117 槽目录含 `main`/`sidebar.panellist`、`inputTriggers` 契约 0.2.1→0.2.2 仅 i18n 差异、29/29 主题 token 有定义）；隔离 `DSH_HOME` 真实 0.2.2-rc.1 端到端 **27/27**（安装放行、路由/工具/命令注册、HTTP CRUD 25/25、重启持久化 6/6、client 注入）；反证旧范围被 install preflight 拒绝 + 启动 skip + 路由 404；运行中 desktop 重装 0.5.2 后 live 复验通过（`todo_time_log` 可调用、`/health` loaded 12 条、`main`/`sidebar.panellist` 槽位 active）。详见 [`docs/verification.md` §24](./docs/verification.md) | PASS（契约 + 真机端到端）；浏览器像素级 UI 与真实模型回合调用工具未覆盖 |
 
 ---
 
 ## 8. 发布 npm 版本
 
 发布由 GitHub Actions 工作流 [`.github/workflows/publish.yml`](./.github/workflows/publish.yml) 自动完成：
-推送形如 `v0.5.1` 的 tag 时，工作流会校验 tag 与 `package.json` 版本一致、跑 `npm run check` / `npm test` / `npm run audit`、打包预演，
+推送形如 `v0.5.2` 的 tag 时，工作流会校验 tag 与 `package.json` 版本一致、先 `npm ci`，再跑 `npm run check`、`npm run build`（并用 `git diff` 校验产物与源码同步）/ `npm test` / `npm run audit`、打包预演，
 再通过 **npm 可信发布（OIDC，无需 NPM_TOKEN）** 发布并自动创建 GitHub Release。
 
 ```bash

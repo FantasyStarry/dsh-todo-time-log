@@ -1,3 +1,6 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,10 +8,17 @@ import { TodoStore, normalizeTodo, sortTodos, filterTodos, computeStats, validat
 import { formatLocalDateTime, toIsoString, parseTimestamp } from '../lib/time.js';
 import { executeTodoAction, resolveDataFile, decorateTodo, createTodoTool, buildProjectSuggestions, runQuickAdd, resolveCommandAttachmentFiles } from '../lib/index.js';
 
-const checks = [];
+// Registers each assertion as an independent `node:test` test so failures
+// are reported under the original descriptive name. Conditions and detail
+// snapshots are evaluated eagerly, which keeps the sequential shared-state
+// semantics of this file unchanged.
 function check(name, condition, detail) {
-  checks.push({ name, ok: Boolean(condition), detail });
-  if (!condition) console.error('FAIL', name, detail ?? '');
+  const message = detail === undefined
+    ? undefined
+    : typeof detail === 'string' ? detail : inspect(detail, { depth: 4, breakLength: 160 });
+  test(name, () => {
+    assert.ok(Boolean(condition), message);
+  });
 }
 
 const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'ttl-smoke-'));
@@ -740,10 +750,3 @@ await reloadedStore.dispose();
 await corruptStore.dispose();
 await actionStore.dispose();
 await fsp.rm(dir, { recursive: true, force: true });
-
-const failed = checks.filter((c) => !c.ok);
-console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
-if (failed.length > 0) {
-  for (const f of failed) console.error('FAILED:', f.name, f.detail ?? '');
-  process.exit(1);
-}

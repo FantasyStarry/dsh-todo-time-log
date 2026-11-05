@@ -1,0 +1,90 @@
+# 持续集成：push / PR 触发，覆盖 Linux 与 Windows、Node 20/22/24。
+#
+# 检查项：
+#   1. 语法检查（node --check）
+#   2. ESLint
+#   3. tsc --checkJs（JSDoc 类型检查）
+#   4. esbuild 构建 client 产物，并校验 `lib/client.js` 与源码同步
+#   5. node:test 全部测试（parse / smoke / http / UI 渲染 / 并发写入）
+#   6. client.js 静态审计
+#   7. 覆盖率（单独 job，Node 24）
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22, 24]
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 语法检查
+        run: npm run check
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: 类型检查（tsc --checkJs）
+        run: npm run typecheck
+
+      - name: 构建 client 产物
+        run: npm run build
+
+      - name: 校验 client 产物与源码同步
+        if: runner.os == 'Linux'
+        run: git diff --exit-code -- lib/client.js
+
+      - name: 单元 / 集成测试
+        run: npm test
+
+      - name: client.js 静态审计
+        run: npm run audit
+
+  coverage:
+    name: coverage (node 24)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 生成 client 产物（UI 测试读取构建结果）
+        run: npm run build
+
+      - name: 覆盖率
+        run: npm run test:coverage

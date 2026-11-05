@@ -2,13 +2,23 @@
  * Unit tests for the natural-language quick-add parser (lib/parse.js) and the
  * project/file derivation rules in lib/store.js.
  */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { parseQuickAdd, parseQuickAddLine, normalizeFilePath, looksLikeFilePath, stripFillers, hasQuickAddMarkers, hasPriorityMarker, hasTypeMarker } from '../lib/parse.js';
 import { deriveProjectFromFiles, validateFiles } from '../lib/store.js';
 
-const checks = [];
+// Registers each assertion as an independent `node:test` test so failures
+// are reported under the original descriptive name. Conditions and detail
+// snapshots are evaluated eagerly, which keeps the sequential shared-state
+// semantics of this file unchanged.
 function check(name, condition, detail) {
-  checks.push({ name, ok: Boolean(condition), detail });
-  if (!condition) console.error('FAIL', name, detail ?? '');
+  const message = detail === undefined
+    ? undefined
+    : typeof detail === 'string' ? detail : inspect(detail, { depth: 4, breakLength: 160 });
+  test(name, () => {
+    assert.ok(Boolean(condition), message);
+  });
 }
 
 const parse1 = parseQuickAddLine('新任务 写周报 #工作 @src/auth/login.ts');
@@ -200,10 +210,3 @@ check('hasTypeMarker false for unknown ^value', hasTypeMarker('^foo 写周报') 
 check('hasTypeMarker false for prototype:bug', hasTypeMarker('prototype:bug 修复') === false);
 check('^buggy is not a type marker', hasTypeMarker('^buggy 任务') === false);
 check('hasQuickAddMarkers recognises type marker', hasQuickAddMarkers('写周报 ^bug') === true);
-
-const failed = checks.filter((item) => !item.ok);
-console.log(`\n${checks.length - failed.length}/${checks.length} parser checks passed`);
-if (failed.length > 0) {
-  for (const item of failed) console.error('FAILED:', item.name, item.detail ?? '');
-  process.exit(1);
-}
