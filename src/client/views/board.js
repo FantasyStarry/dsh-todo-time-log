@@ -1,9 +1,9 @@
 /** 看板视图（列 / 泳道 / 卡片）。 */
-import { EMPTY_TIME, boardColumns, formatDurationShort, formatTime, normalizeFiles, normalizePriority, normalizeProject, normalizeType, projectLabel, toMillis } from '../helpers.js';
+import { EMPTY_TIME, boardColumns, formatDurationShort, formatTime, normalizeFiles, normalizePriority, normalizeProject, normalizeType, projectLabel, projectTone, toMillis } from '../helpers.js';
 import { t } from '../i18n.js';
 import { h } from '../runtime.js';
 import { BOARD_COMPLETED_LIMIT, BOARD_MOVE_UNCATEGORIZED, PRIORITIES, TYPES } from '../styles.js';
-import { TextPlaceholder } from '../widgets.js';
+import { CheckButton, TextPlaceholder } from '../widgets.js';
 
 export function createBoardView(deps) {
   const { boardActionsId, boardGroupBy, boardLaneCollapsed, boardShowAllCompleted, busyId, confirmId, density, editingId, editingPriority, editingType, emptyActionKey, emptyColumnKey, handleColumnAdd, handleDelete, handleEmptyAction, handleLaneAdd, handleMoveProject, handleSetPriority, handleSetType, handleToggle, isBusy, nowMs, priorityBadge, prioritySelectControl, projectInput, projectSuggestions, renderFileChips, setBoardActionsId, setBoardLaneCollapsed, setBoardShowAllCompleted, setConfirmId, setEditingPriority, setEditingType, startEdit, statusBadge, titleInput, typeBadge, typeSelectControl, visibleTodos } = deps;
@@ -34,24 +34,6 @@ export function createBoardView(deps) {
       )
     );
   };
-
-  const boardCheckIcon = (completed) =>
-    h(
-      'svg',
-      {
-        width: 12,
-        height: 12,
-        viewBox: '0 0 16 16',
-        fill: 'none',
-        stroke: 'currentColor',
-        strokeWidth: 2,
-        strokeLinecap: 'round',
-        strokeLinejoin: 'round',
-        'aria-hidden': 'true',
-        focusable: 'false',
-      },
-      completed ? h('path', { d: 'M3.5 8.5l3 3 6-6.5' }) : null
-    );
 
   const renderBoardCard = (todo) => {
     const isEditing = editingId === todo.id;
@@ -93,23 +75,16 @@ export function createBoardView(deps) {
             typeSelectControl(editingType, setEditingType, busyId === todo.id)
           )
         : [
-            h(
-              'button',
-              {
-                key: 'check',
-                type: 'button',
-                className: 'ttl-board-check',
-                role: 'checkbox',
-                'aria-checked': completed ? 'true' : 'false',
-                'aria-label': t('board.checkAria', { title }),
-                'data-checked': completed ? 'true' : 'false',
-                disabled: isBusy,
-                onClick: () => {
-                  void handleToggle(todo);
-                },
+            h(CheckButton, {
+              key: 'check',
+              checked: completed,
+              disabled: isBusy,
+              label: t('board.checkAria', { title }),
+              className: 'ttl-board-check',
+              onClick: () => {
+                void handleToggle(todo);
               },
-              boardCheckIcon(completed)
-            ),
+            }),
             h(
               'div',
               { key: 'main', className: 'ttl-board-card-main' },
@@ -124,8 +99,8 @@ export function createBoardView(deps) {
                       'span',
                       { className: 'ttl-board-project', title: projectLabel(project) },
                       h('span', {
-                        className: 'ttl-board-dot',
-                        'data-status': 'project',
+                        className: 'ttl-project-dot',
+                        'data-tone': projectTone(project),
                         'aria-hidden': 'true',
                       }),
                       h('span', { className: 'ttl-board-project-name' }, projectLabel(project))

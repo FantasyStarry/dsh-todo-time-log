@@ -1,6 +1,6 @@
 # 本机验证记录
 
-> 本文档是 [README](../README.md) 的扩展说明，记录项目自验证据（2026-11-03，desktop profile；按阶段累积，最新一轮见表格末尾「九期」相关记录）。
+> 本文档是 [README](../README.md) 的扩展说明，记录项目自验证据（2026-11-03，desktop profile；按阶段累积，最新一轮见表格末尾「十一期」相关记录）。
 
 本记录是项目**自验**结果，按阶段累积，不是独立第三方结论；独立第三方 QA 报告见 [verification.md](./verification.md)，相关预览图见 [preview/](./preview/README.md)。
 
@@ -45,3 +45,5 @@
 | 八期 Host 契约（type v5） | `node --check` 3 个 Host 模块通过；`npm test` **79 + 174 + 66** 全绿；v1–v4→v5 迁移、type 校验/归一化/部分更新、quick-add 标记与表单回退均有断言覆盖 | PASS |
 | 八期类型 UI + @ 菜单渲染验收 | jsdom harness **58 条**断言全绿（类型徽标、类型 select 写回 + 撤销、新建表单携带类型、类型筛选、搜索命中类型名、表格类型徽标；`/todo` 草稿的 `@` 菜单含「待办优先级 / 待办类型」候选，选中分别插入 `!high ` / `^bug `，分类候选行为不变）；`npm run audit` **28/28**（i18n **253 键/语言**、24 token、189 类名）；预览 `04`、`12`–`18` 已按类型徽标重拍 | PASS（渲染/结构）；真机需重启插件 + 刷新页面确认 |
 | 九期 DSH 0.2.2-rc.1 兼容性（0.5.2） | 旧 `engines.dsh` 上界 `<0.2.2-0` 会排除预发布 `0.2.2-rc.1`（DSH preflight 用 `semver.satisfies(..., {includePrerelease:true})`），导致插件被禁用；已改为 `>=0.2.0-rc.2 <0.2.3-0` 并升 0.5.2。独立复核：Host 9 个集成点 **0 BREAK / 1 RISK(低) / 8 PASS**（真实 DSH JSON-Schema/工具管线探针 **47/47**）；Client **6/6 PASS**（117 槽目录含 `main`/`sidebar.panellist`、`inputTriggers` 契约 0.2.1→0.2.2 仅 i18n 差异、29/29 主题 token 有定义）；隔离 `DSH_HOME` 真实 0.2.2-rc.1 端到端 **27/27**（安装放行、路由/工具/命令注册、HTTP CRUD 25/25、重启持久化 6/6、client 注入）；反证旧范围被 install preflight 拒绝 + 启动 skip + 路由 404；运行中 desktop 重装 0.5.2 后 live 复验通过（`todo_time_log` 可调用、`/health` loaded 12 条、`main`/`sidebar.panellist` 槽位 active）。详见 [`docs/verification.md` §24](./verification.md) | PASS（契约 + 真机端到端）；浏览器像素级 UI 与真实模型回合调用工具未覆盖 |
+| 十期表格排版同步（对齐效果图） | 表格改 `table-layout: fixed` + `<colgroup>`：标题列吃剩余宽度、状态列固定 156px（三枚徽标不再竖排）、创建/完成时间各 126px、操作 174px；徽标行 `flex-wrap: nowrap`、标题两行截断；面板显式 `font-family: var(--dsw-font-family, …)`（真机本就继承宿主字体，此声明让静态预览与真机字形一致，数字字宽 110→107px）；新增 `.tools/preview` 的 `app-width` 场景（980 CSS / DSF=1 / `--real` 使用 `~/.dsh/todo-time-log/todos.json`）与真机截图逐行对照：状态徽标由 2–3 行竖排回到单行、行高 67–130px → 45–60px；`docs/images` 14 张按新排版重拍；`npm run verify` 全绿（build + check + lint + typecheck + **342** 用例 + audit 28 项） | PASS（渲染/静态）；真机需刷新页面后人工确认 |
+| 十一期视觉强化（参考 4 份设计稿） | 表格与看板统一一套语言：**行首完成勾选圈**（替代表格里「完成/取消完成」文本按钮，操作列 174→118px 把宽度还给标题）、**分类色点**（名称哈希到宿主状态色，明暗主题各自取色，未分类中性）、**状态胶囊带点**、**类型矩形小标签**、**优先级箭头 + 文字**（↑高 / ↗中 / ↓低，去掉第二枚彩色胶囊）；`table-layout: fixed` 列宽改为 勾选 40 / 分类 104 / 状态 160 / 创建·完成各 126 / 操作 118；数据卡片圆角 16 + `--dsw-shadow-lv1`，表头 11px 三级色，行内操作默认降亮、hover/键盘聚焦提亮，完成行标题降级；看板卡片 12px 圆角 + hover 阴影；新增 `ttl-col-check` 等类名（audit：**27** 个 alias token、**194** 个 `ttl-` 类名）；jsdom UI 用例补「7 个 col / 行首勾选圈 role=checkbox / 点击发 `/complete` / 类型标签 / 优先级箭头」；`npm run verify` 全绿（build + check + lint + typecheck + **342** 用例 + audit 28 项）；`docs/images` 14 张重拍 | PASS（渲染/静态）；真机需刷新页面后人工确认 |

@@ -376,7 +376,7 @@ after(() => {
 });
 
 test('a+b+f. 页头、新建框、四视图分段、筛选计数与两行表格（含已完成徽标）', async () => {
-  await withPanel(defaultHandler(), async ({ container, calls }) => {
+  await withPanel(defaultHandler(), async ({ container, calls, click }) => {
     // a. 页头：标题与「timeFormat 来自 /list」的副标题
     const root = container.querySelector('.ttl-root');
     assert.ok(root, '应渲染 .ttl-root 面板根节点');
@@ -420,6 +420,23 @@ test('a+b+f. 页头、新建框、四视图分段、筛选计数与两行表格�
     const timeCells = [...container.querySelectorAll('.ttl-td-time')].map(textOf);
     assert.ok(timeCells.some(isTime), '创建时间应格式化为 YYYY-MM-DD HH:mm:ss');
 
+    // b2. 固定列宽：7 个 <col>（勾选 + 标题 + 分类 + 状态 + 两列时间 + 操作）
+    const cols = [...container.querySelectorAll('.ttl-table colgroup col')];
+    assert.equal(cols.length, 7, '表格应有 7 个 col（固定列宽）');
+    assert.deepEqual(
+      cols.map((col) => String(col.className)),
+      [
+        'ttl-col ttl-col-check',
+        'ttl-col ttl-col-title',
+        'ttl-col ttl-col-project',
+        'ttl-col ttl-col-status',
+        'ttl-col ttl-col-createdAt',
+        'ttl-col ttl-col-completedAt',
+        'ttl-col ttl-col-actions',
+      ],
+      '列顺序与列宽类应稳定'
+    );
+
     // f. 状态徽标：未完成 / 已完成（含 ttl-badge-completed）
     const pendingRow = rows.find((row) => row.getAttribute('data-status') === 'pending');
     const completedRow = rows.find((row) => row.getAttribute('data-status') === 'completed');
@@ -428,6 +445,21 @@ test('a+b+f. 页头、新建框、四视图分段、筛选计数与两行表格�
     const completedBadge = completedRow.querySelector('.ttl-td-status .ttl-badge-completed');
     assert.ok(completedBadge, '已完成待办应带 ttl-badge-completed 徽标');
     assert.equal(textOf(completedBadge), '已完成');
+    // 类型是矩形小标签、优先级是「箭头 + 文字」（无第二枚彩色胶囊）
+    assert.equal(textOf(pendingRow.querySelector('.ttl-type-badge')), '杂项');
+    assert.equal(textOf(pendingRow.querySelector('.ttl-priority-badge')), '↑高');
+
+    // g. 行首勾选圈：未完成未选中 / 已完成已选中，点击即请求 /complete
+    const pendingCheck = pendingRow.querySelector('.ttl-td-check .ttl-row-check');
+    const completedCheck = completedRow.querySelector('.ttl-td-check .ttl-row-check');
+    assert.ok(pendingCheck && completedCheck, '每行行首应有勾选圈');
+    assert.equal(pendingCheck.getAttribute('role'), 'checkbox');
+    assert.equal(pendingCheck.getAttribute('aria-checked'), 'false');
+    assert.equal(completedCheck.getAttribute('aria-checked'), 'true');
+    await click(pendingCheck);
+    const completeCall = calls.filter((call) => call.action === 'complete').pop();
+    assert.ok(completeCall, '点击勾选圈应请求 /complete');
+    assert.equal(completeCall.body.id, 'todo-pending');
 
     // 首次挂载的接口调用：/list + /projects（分类建议预取）
     assert.ok(calls.some((call) => call.action === 'list'), '挂载时应请求 /list');

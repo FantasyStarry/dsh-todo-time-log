@@ -6,7 +6,7 @@ import { TABLE_COLUMNS } from '../styles.js';
 import { EmptyPlaceholder, ProjectBadge } from '../widgets.js';
 
 export function createTableView(deps) {
-  const { confirmId, detailIdOf, direction, editingId, emptyActionKey, expandedIds, filter, handleEmptyAction, handleHeaderSort, listStatus, priorityBadge, projectInput, renderActionButtons, renderDetailContent, renderFileChips, setConfirmId, sortBy, statusBadge, titleInput, toggleExpanded, typeBadge, visibleTodos } = deps;
+  const { confirmId, detailIdOf, direction, editingId, emptyActionKey, expandedIds, filter, handleEmptyAction, handleHeaderSort, listStatus, priorityBadge, projectInput, renderActionButtons, renderDetailContent, renderFileChips, renderRowCheck, setConfirmId, sortBy, statusBadge, titleInput, toggleExpanded, typeBadge, visibleTodos } = deps;
 
   const pushTableRow = (rows, todo) => {
     const completed = todo.status === 'completed';
@@ -51,6 +51,7 @@ export function createTableView(deps) {
             }
           },
         },
+        h('td', { className: 'ttl-td ttl-td-check' }, renderRowCheck(todo)),
         titleCell,
         h(
           'td',
@@ -64,7 +65,7 @@ export function createTableView(deps) {
         ),
         h('td', { className: 'ttl-td ttl-td-time' }, formatTime(todo.createdAt)),
         h('td', { className: 'ttl-td ttl-td-time' }, completed ? formatTime(todo.completedAt) : EMPTY_TIME),
-        h('td', { className: 'ttl-td ttl-td-actions' }, renderActionButtons(todo, { showDetail: true }))
+        h('td', { className: 'ttl-td ttl-td-actions' }, renderActionButtons(todo, { showDetail: true, showToggle: false }))
       )
     );
     if (expanded) {
@@ -129,6 +130,11 @@ export function createTableView(deps) {
           'aria-busy': listStatus === 'loading' ? 'true' : 'false',
         },
         h(
+          'colgroup',
+          null,
+          TABLE_COLUMNS.map((column) => h('col', { key: column.key, className: `ttl-col ttl-col-${column.key}` }))
+        ),
+        h(
           'thead',
           null,
           h(
@@ -144,10 +150,13 @@ export function createTableView(deps) {
                   scope: 'col',
                   className:
                     (column.sortBy === null ? 'ttl-th' : 'ttl-th ttl-th-sortable') +
-                    (column.align === 'right' ? ' ttl-th-right' : ''),
+                    (column.align === 'right' ? ' ttl-th-right' : '') +
+                    ` ttl-th-${column.key}`,
                   'aria-sort': column.sortBy === null ? undefined : ariaSort,
                 },
-                column.sortBy === null
+                column.srOnly === true
+                  ? h('span', { className: 'ttl-sr-only' }, t(column.labelKey))
+                  : column.sortBy === null
                   ? h('span', null, t(column.labelKey))
                   : h(
                       'button',

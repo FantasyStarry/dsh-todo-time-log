@@ -26,7 +26,7 @@ npm run verify    # 以上全套（build + check + lint + typecheck + test + aud
 - `test/http.test.mjs`（77 用例）：真实 HTTP 服务上的 prefix 路由、GET health、错误码映射（400/404/405/409）、非法 JSON、数组 body、「HTTP 写入后重新加载可读」，分类/优先级/类型的非法值 400、`sortBy=priority`、只改 priority/type，以及 `/quick-add`（多条 + `#分类` + `@文件` + `!优先级` + `^类型` 标记与表单回退）、`/create` 带 `files`/`priority`/`type`、`/files` 无文件服务时 501；宿主认证（`authorize` 返回 401 → 所有路由 401 + `UNAUTHORIZED` 信封、403 → 403、admission 抛错 → 403、放行 → 正常）。
 - `test/store-concurrency.test.mjs`（8 用例）：两个实例交错写同一数据文件时 mtime 合并、同 id 取 `updatedAt` 较新者、`Promise.all` 并发写不损坏不丢、tombstone 防删除复活、陈旧锁清理、锁占用超时后下次写入补齐、写前发现损坏数据不重复归档。
 - `test/ui/panel.test.mjs`（4 用例）：jsdom + 真实 React 18 渲染构建产物 `lib/client.js`；覆盖页头/新建框/四视图分段/筛选计数、表格行与时间格式、空态、错误态与重试恢复、看板切换与两列。jsdom 无布局/绘制，视觉回归仍需真机或 Playwright（本轮未接入）。
-- `test/client-audit.mjs`（28 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册。当前口径：**253 键/语言、24 个 alias token、189 个 `ttl-` className**。
+- `test/client-audit.mjs`（28 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册。当前口径：**253 键/语言、27 个 alias token、194 个 `ttl-` className**。
 - `test/live-utf8.py` / `test/live-projects.py`：对**运行中实例**的真实往返（中文标题、分类筛选、迁移版本落盘、清理测试数据），需设置 `DSH_WEB_URL`（默认 `http://127.0.0.1:52283`）。
 
 **CI（`.github/workflows/ci.yml`）**：push / PR 触发，矩阵 Node 20 / 22 / 24 × Ubuntu / Windows，依次跑 `check`、`lint`、`typecheck`、`build`、`test`、`audit`；Linux 上额外用 `git diff --exit-code -- lib/client.js` 校验构建产物与源码同步，另有 Node 24 覆盖率 job。发布工作流同样先 `npm ci` 再跑 `build` + 测试 + 审计。

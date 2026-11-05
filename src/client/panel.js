@@ -8,7 +8,7 @@ import { createBoardView } from './views/board.js';
 import { createCalendarView } from './views/calendar.js';
 import { renderGanttView } from './views/gantt.js';
 import { createTableView } from './views/table.js';
-import { ChatPanel, ErrorPlaceholder, FileChip, LoadingPlaceholder, ProjectPicker, SuggestionDropdown, TextPlaceholder, ToastIcon } from './widgets.js';
+import { ChatPanel, CheckButton, ErrorPlaceholder, FileChip, LoadingPlaceholder, ProjectPicker, SuggestionDropdown, TextPlaceholder, ToastIcon } from './widgets.js';
 
 export /** 面板主体。所有请求与交互状态都在这里，接口异常不会抛到槽位。 */
 function TodoPanel() {
@@ -921,7 +921,12 @@ function TodoPanel() {
   const statusBadge = (todo) =>
     h(
       'span',
-      { className: todo.status === 'completed' ? 'ttl-badge ttl-badge-completed' : 'ttl-badge' },
+      {
+        className:
+          todo.status === 'completed'
+            ? 'ttl-badge ttl-status-badge ttl-badge-completed'
+            : 'ttl-badge ttl-status-badge',
+      },
       t(todo.status === 'completed' ? 'row.completed' : 'row.pending')
     );
 
@@ -935,6 +940,11 @@ function TodoPanel() {
         className: `ttl-badge ttl-priority-badge ttl-priority-${priority}`,
         'data-priority': priority,
       },
+      h(
+        'span',
+        { className: 'ttl-priority-arrow', 'aria-hidden': 'true' },
+        priority === 'high' ? '↑' : priority === 'medium' ? '↗' : '↓'
+      ),
       t(`priority.${priority}`)
     );
   };
@@ -1071,22 +1081,25 @@ function TodoPanel() {
       return buttons;
     }
     if (opts.showDetail === true) buttons.push(detailToggleButton(todo));
-    buttons.push(
-      h(
-        'button',
-        {
-          key: 'toggle',
-          type: 'button',
-          className: 'ttl-link',
-          disabled: isBusy,
-          'aria-label': t('row.toggleAria', { action: toggleLabel, title: todo.title }),
-          onClick: () => {
-            void handleToggle(todo);
+    // 表格行首已有勾选圈，操作区不再重复「完成 / 取消完成」。
+    if (opts.showToggle !== false) {
+      buttons.push(
+        h(
+          'button',
+          {
+            key: 'toggle',
+            type: 'button',
+            className: 'ttl-link',
+            disabled: isBusy,
+            'aria-label': t('row.toggleAria', { action: toggleLabel, title: todo.title }),
+            onClick: () => {
+              void handleToggle(todo);
+            },
           },
-        },
-        toggleLabel
-      )
-    );
+          toggleLabel
+        )
+      );
+    }
     buttons.push(
       h(
         'button',
@@ -1144,6 +1157,21 @@ function TodoPanel() {
       );
     }
     return buttons;
+  };
+
+  /** 表格行首勾选圈：点一下标记完成 / 取消完成（与看板卡片同一交互与 toast）。 */
+  const renderRowCheck = (todo) => {
+    const completed = todo.status === 'completed';
+    return h(CheckButton, {
+      checked: completed,
+      disabled: isBusy,
+      label: t('board.checkAria', { title: todo.title === '' ? t('list.empty') : todo.title }),
+      title: t(completed ? 'row.uncomplete' : 'row.complete'),
+      className: 'ttl-row-check',
+      onClick: () => {
+        void handleToggle(todo);
+      },
+    });
   };
 
   /** 文件 chip 点击：navigator.clipboard 可用时复制并轻提示，否则静默降级。 */
@@ -1403,6 +1431,7 @@ function TodoPanel() {
     renderActionButtons,
     renderDetailContent,
     renderFileChips,
+    renderRowCheck,
     setBoardActionsId,
     setBoardLaneCollapsed,
     setBoardShowAllCompleted,

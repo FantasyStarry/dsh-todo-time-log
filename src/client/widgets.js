@@ -1,5 +1,5 @@
 /** 通用小组件、徽标、甘特图、项目选择器与对话录入面板。 */
-import { GANTT_LABEL_WIDTH, GANTT_TRACK_WIDTH, chooseTickStep, fileBaseName, formatTickLabel, formatTime, groupByProject, isRecord, normalizeFiles, normalizeProject, projectLabel, toMillis } from './helpers.js';
+import { GANTT_LABEL_WIDTH, GANTT_TRACK_WIDTH, chooseTickStep, fileBaseName, formatTickLabel, formatTime, groupByProject, isRecord, normalizeFiles, normalizeProject, projectLabel, projectTone, toMillis } from './helpers.js';
 import { t } from './i18n.js';
 import { React, h } from './runtime.js';
 import { GANTT_RANGES, PROJECT_CUSTOM } from './styles.js';
@@ -88,6 +88,7 @@ export function LoadingPlaceholder() {
     h(
       'div',
       { key: index, className: 'ttl-skeleton-row' },
+      bar(true),
       bar(),
       bar(),
       bar(true),
@@ -154,11 +155,62 @@ export function ErrorPlaceholder(props) {
   );
 }
 
-/** 分类徽标；未分类用弱化样式。 */
+/** 分类徽标：色点 + 名称（色点由分类名哈希决定，跨视图一致）；未分类用中性色。 */
 export function ProjectBadge(props) {
   const project = normalizeProject(props && props.project);
   const className = project === '' ? 'ttl-badge ttl-badge-project ttl-badge-project-none' : 'ttl-badge ttl-badge-project';
-  return h('span', { className, title: projectLabel(project) }, projectLabel(project));
+  return h(
+    'span',
+    { className, title: projectLabel(project), 'data-tone': projectTone(project) },
+    h('span', { className: 'ttl-project-dot', 'aria-hidden': 'true' }),
+    h('span', { className: 'ttl-project-name' }, projectLabel(project))
+  );
+}
+
+/** 勾选图标：表格行与看板卡片共用。 */
+export function CheckIcon(props) {
+  const checked = Boolean(props && props.checked);
+  return h(
+    'svg',
+    {
+      width: 12,
+      height: 12,
+      viewBox: '0 0 16 16',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 2,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      'aria-hidden': 'true',
+      focusable: 'false',
+    },
+    checked ? h('path', { d: 'M3.5 8.5l3 3 6-6.5' }) : null
+  );
+}
+
+/** 圆圈勾选按钮：role=checkbox 的按钮，表格行与看板卡片复用。 */
+export function CheckButton(props) {
+  const checked = Boolean(props && props.checked);
+  const disabled = Boolean(props && props.disabled);
+  const label = props && typeof props.label === 'string' ? props.label : '';
+  const hover = props && typeof props.title === 'string' && props.title !== '' ? props.title : undefined;
+  const className = props && typeof props.className === 'string' && props.className !== '' ? props.className : '';
+  const onClick = props && typeof props.onClick === 'function' ? props.onClick : null;
+  return h(
+    'button',
+    {
+      type: 'button',
+      className: className === '' ? 'ttl-check' : `ttl-check ${className}`,
+      role: 'checkbox',
+      'aria-checked': checked ? 'true' : 'false',
+      'aria-label': label,
+      title: hover,
+      'data-checked': checked ? 'true' : 'false',
+      disabled,
+      onClick,
+    },
+    h(CheckIcon, { checked })
+  );
 }
 
 /**

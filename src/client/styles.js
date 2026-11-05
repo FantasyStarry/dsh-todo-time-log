@@ -65,8 +65,9 @@ export const CALENDAR_WEEKDAY_KEYS = [
   'calendar.weekdaySat',
   'calendar.weekdaySun',
 ];
-/** 表格列：sortBy 为 null 时该列不可排序（状态/操作）。 */
+/** 表格列：sortBy 为 null 时该列不可排序（勾选/状态/操作）；srOnly 列只给读屏保留标签。 */
 export const TABLE_COLUMNS = [
+  { key: 'check', labelKey: 'row.complete', sortBy: null, srOnly: true },
   { key: 'title', labelKey: 'table.title', sortBy: 'title' },
   { key: 'project', labelKey: 'table.project', sortBy: 'project' },
   { key: 'status', labelKey: 'table.status', sortBy: null },
@@ -112,8 +113,13 @@ export const CSS_TEXT = `.ttl-root {
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-bg-base);
+  /* 与宿主 UI 同一套字体栈（真机继承宿主 body 字体）：显式声明后，静态预览与真机一致，
+     也不会被祖先样式改掉。 */
+  font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif);
   font-size: 14px;
   line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 .ttl-scroll {
   flex: 1;
@@ -301,8 +307,9 @@ export const CSS_TEXT = `.ttl-root {
 /* 数据区：视图/筛选控制与列表同属一张卡片，成为唯一的数据容器。 */
 .ttl-data {
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md);
+  border-radius: var(--dsw-radius-lg);
   background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-shadow-lv1);
   overflow: hidden;
 }
 .ttl-data > .ttl-toolbar {
@@ -559,8 +566,8 @@ export const CSS_TEXT = `.ttl-root {
   display: inline-flex;
   align-items: center;
   flex: none;
-  height: 20px;
-  padding: 0 8px;
+  height: 18px;
+  padding: 0 7px;
   border: 0;
   border-radius: 9999px;
   background: color-mix(in srgb, var(--dsw-alias-label-secondary) 9%, transparent);
@@ -574,19 +581,36 @@ export const CSS_TEXT = `.ttl-root {
   background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
   color: var(--dsw-alias-state-success-primary);
 }
-.ttl-badge-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.ttl-badge.ttl-priority-high {
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
-  color: var(--dsw-alias-state-error-primary);
+/* 状态：胶囊 + 状态点（颜色沿用胶囊文字色）。 */
+.ttl-status-badge::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
 }
-.ttl-badge.ttl-priority-medium {
-  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent);
-  color: var(--dsw-alias-state-warn-primary);
+.ttl-badge-row { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+/* 类型：小号圆角矩形标签（与状态胶囊区分层级）。 */
+.ttl-badge.ttl-type-badge {
+  border-radius: 5px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
 }
-.ttl-badge.ttl-priority-low {
-  background: color-mix(in srgb, var(--dsw-alias-label-secondary) 9%, transparent);
-  color: var(--dsw-alias-label-secondary);
+/* 优先级：箭头 + 文字，不再用第二个彩色胶囊，避免「标签汤」。 */
+.ttl-badge.ttl-priority-badge {
+  gap: 3px;
+  padding: 0;
+  background: none;
+  font-weight: 500;
 }
+.ttl-priority-arrow { font-size: 11px; line-height: 1; }
+.ttl-badge.ttl-priority-badge.ttl-priority-high { background: none; color: var(--dsw-alias-state-error-primary); }
+.ttl-badge.ttl-priority-badge.ttl-priority-medium { background: none; color: var(--dsw-alias-state-warn-label); }
+.ttl-badge.ttl-priority-badge.ttl-priority-low { background: none; color: var(--dsw-alias-label-tertiary); }
 .ttl-priority-select select { min-width: 64px; }
 .ttl-type-select select { min-width: 76px; }
 .ttl-badge.ttl-type-bug {
@@ -663,7 +687,7 @@ export const CSS_TEXT = `.ttl-root {
   gap: 2px;
 }
 .ttl-link {
-  padding: 2px 6px;
+  padding: 2px 3px;
   border: 0;
   border-radius: 6px;
   background: none;
@@ -733,10 +757,11 @@ export const CSS_TEXT = `.ttl-root {
 }
 .ttl-skeleton-row {
   display: grid;
-  grid-template-columns: 32fr 14fr 8fr 12fr 12fr 10fr;
+  /* 与 .ttl-table 的列宽同口径（标题吃剩余，状态列固定），骨架屏不跳列。 */
+  grid-template-columns: 20px minmax(0, 1fr) 72px 132px 100px 100px 92px;
   align-items: center;
-  gap: 24px;
-  height: 44px;
+  gap: 12px;
+  height: 42px;
   padding: 0 12px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
 }
@@ -787,13 +812,33 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-board-edit .ttl-project-picker { flex: 1 1 100%; }
 .ttl-calendar-entry-edit .ttl-project-picker { flex: 1 1 100%; }
 .ttl-gantt-row-edit .ttl-project-picker { flex: 0 1 220px; }.ttl-badge-project {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
   padding: 0;
   background: none;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   font-weight: 400;
+}
+.ttl-project-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+.ttl-badge-project[data-tone='business'] .ttl-project-dot { background: var(--dsw-alias-state-business-primary); }
+.ttl-badge-project[data-tone='done'] .ttl-project-dot { background: var(--dsw-alias-state-done-primary); }
+.ttl-badge-project[data-tone='success'] .ttl-project-dot { background: var(--dsw-alias-state-success-primary); }
+.ttl-badge-project[data-tone='warn'] .ttl-project-dot { background: var(--dsw-alias-state-warn-primary); }
+.ttl-badge-project[data-tone='error'] .ttl-project-dot { background: var(--dsw-alias-state-error-primary); }
+.ttl-badge-project[data-tone='idle'] .ttl-project-dot { background: var(--dsw-alias-label-caption); }
+.ttl-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ttl-badge-project-none { color: var(--dsw-alias-label-caption); }
 
@@ -1103,22 +1148,33 @@ export const CSS_TEXT = `.ttl-root {
 }
 .ttl-table {
   width: 100%;
-  min-width: 700px;
+  /* 固定列宽：列宽只由 col 决定，不随标题长短跳动（否则长标题会挤扁状态列，徽标被迫换行）。 */
+  table-layout: fixed;
+  min-width: 860px;
   border-collapse: collapse;
   font-size: 13px;
 }
+/* 列宽口径：标题吃掉剩余宽度，其余列固定，保证「状态」列永远放得下一行徽标。 */
+.ttl-col-check { width: 40px; }
+.ttl-col-project { width: 104px; }
+.ttl-col-status { width: 160px; }
+.ttl-col-createdAt { width: 126px; }
+.ttl-col-completedAt { width: 126px; }
+.ttl-col-actions { width: 118px; }
 .ttl-th {
-  height: 36px;
+  height: 34px;
   padding: 0 12px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-module-platform);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
   text-align: left;
   white-space: nowrap;
 }
+.ttl-th-check { width: 40px; padding: 0 4px 0 12px; }
 .ttl-th-right { text-align: right; }
 .ttl-th-sortable { padding: 0; }
 .ttl-th-button {
@@ -1126,14 +1182,15 @@ export const CSS_TEXT = `.ttl-root {
   align-items: center;
   gap: 4px;
   width: 100%;
-  height: 36px;
+  height: 34px;
   padding: 0 12px;
   border: 0;
   background: none;
   color: inherit;
   font: inherit;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 16px;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -1142,7 +1199,10 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-th-button:hover { color: var(--dsw-alias-label-primary); }
 .ttl-th-button-active { color: var(--dsw-alias-label-primary); }
 .ttl-th-arrow { color: var(--dsw-alias-label-tertiary); font-size: 9px; line-height: 1; }
-.ttl-table-row { border-bottom: 0.5px solid var(--dsw-alias-border-l1); }
+.ttl-table-row {
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+  transition: background 0.12s ease-out;
+}
 .ttl-table-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .ttl-table tbody tr:last-child { border-bottom: 0; }
 .ttl-table-group-row .ttl-td {
@@ -1158,7 +1218,8 @@ export const CSS_TEXT = `.ttl-root {
   vertical-align: middle;
   line-height: 20px;
 }
-.ttl-td-title { max-width: 360px; }
+.ttl-td-check { width: 40px; padding: 11px 4px 11px 12px; }
+.ttl-td-title { max-width: none; }
 .ttl-td-time {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
@@ -1168,7 +1229,17 @@ export const CSS_TEXT = `.ttl-root {
   font-variant-numeric: tabular-nums;
 }
 .ttl-td-actions { text-align: right; white-space: nowrap; }
+/* 操作区默认压低，行 hover / 键盘聚焦时再提亮，避免整张表被按钮占满注意力。 */
+.ttl-td-actions .ttl-link { color: var(--dsw-alias-label-tertiary); }
+.ttl-td-actions .ttl-link:hover { color: var(--dsw-alias-label-primary); }
+.ttl-table-row:hover .ttl-td-actions .ttl-link,
+.ttl-table-row:focus-within .ttl-td-actions .ttl-link { color: var(--dsw-alias-label-secondary); }
+.ttl-td-actions .ttl-link.ttl-link-danger { color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 72%, transparent); }
+.ttl-table-row:hover .ttl-td-actions .ttl-link.ttl-link-danger,
+.ttl-td-actions .ttl-link.ttl-link-danger:hover { color: var(--dsw-alias-state-error-primary); }
 .ttl-table-title-button {
+  display: -webkit-box;
+  width: 100%;
   max-width: 100%;
   padding: 0;
   border: 0;
@@ -1179,10 +1250,15 @@ export const CSS_TEXT = `.ttl-root {
   font-weight: 500;
   line-height: 20px;
   text-align: left;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  /* 最多两行：长标题截断为省略号，完整文案在 title 与「详情」里可见，行高保持稳定。 */
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   cursor: pointer;
 }
 .ttl-table-title-button:hover { color: var(--dsw-alias-state-business-primary); }
+.ttl-table-row[data-status='completed'] .ttl-table-title-button { color: var(--dsw-alias-label-secondary); }
 .ttl-table-detail-row .ttl-td { padding: 0 12px 10px; }
 
 .ttl-board {
@@ -1273,7 +1349,7 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-board-move-select { height: 24px; max-width: 150px; padding: 0 4px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; cursor: pointer; }
 .ttl-board-move-select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
 .ttl-board-compact .ttl-board-card { gap: 2px; padding: 6px 28px 6px 32px; }
-.ttl-board-compact .ttl-board-check { top: 6px; left: 6px; width: 22px; height: 22px; }
+.ttl-board-compact .ttl-board-check { top: 6px; left: 6px; width: 18px; height: 18px; }
 .ttl-board-compact .ttl-board-more { top: 4px; right: 2px; }
 .ttl-board-compact .ttl-board-card-title { -webkit-line-clamp: 1; }
 .ttl-board-compact .ttl-board-card-files { display: none; }
@@ -1292,8 +1368,13 @@ export const CSS_TEXT = `.ttl-root {
   gap: 4px;
   padding: 9px 32px 9px 36px;
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--dsw-alias-bg-base);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ttl-board-card:hover {
+  border-color: var(--dsw-alias-border-l3);
+  box-shadow: var(--dsw-shadow-lv1);
 }
 .ttl-board-card-editing { padding: 9px 10px; }
 .ttl-board-card-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -1322,30 +1403,30 @@ export const CSS_TEXT = `.ttl-root {
 }
 .ttl-board-project { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .ttl-board-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ttl-board-check {
-  position: absolute;
-  top: 8px;
-  left: 8px;
+/* 勾选圈：表格行首与看板卡片共用（看板只额外负责定位）。 */
+.ttl-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   padding: 0;
-  border: 1.5px solid var(--dsw-alias-border-l3);
+  border: 1.5px solid var(--dsw-alias-border-l4);
   border-radius: 50%;
   background: none;
   color: transparent;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
-.ttl-board-check:hover { border-color: var(--dsw-alias-state-success-primary); }
-.ttl-board-check[data-checked='true'] {
+.ttl-check:hover { border-color: var(--dsw-alias-state-success-primary); }
+.ttl-check[data-checked='true'] {
   border-color: var(--dsw-alias-state-success-primary);
   background: var(--dsw-alias-state-success-primary);
   color: var(--dsw-alias-label-primary-foreground);
 }
-.ttl-board-check:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
-.ttl-board-check:disabled { opacity: 0.5; cursor: not-allowed; }
+.ttl-check:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+.ttl-check:disabled { opacity: 0.5; cursor: not-allowed; }
+.ttl-board-check { position: absolute; top: 8px; left: 8px; }
 .ttl-board-more {
   position: absolute;
   top: 6px;
@@ -1606,7 +1687,7 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ttl-file-chip-icon { font-size: 10px; line-height: 1; }
 .ttl-file-more { color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 20px; }
-.ttl-title-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.ttl-title-cell { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; }
 .ttl-board-card-files { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .ttl-calendar-entry-files { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 4px; }
 .ttl-detail-files { display: flex; flex-wrap: wrap; gap: 4px; }

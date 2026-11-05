@@ -463,6 +463,20 @@ export function projectLabel(project) {
   return name === '' ? t('project.none') : name;
 }
 
+/** 分类色相：名称哈希稳定映射到宿主状态色（同一分类在任何视图里颜色一致）。 */
+export const PROJECT_TONES = ['business', 'done', 'success', 'warn', 'error'];
+
+/** 未分类固定中性色，避免和真实分类抢注意力。 */
+export function projectTone(project) {
+  const name = normalizeProject(project);
+  if (name === '') return 'idle';
+  let hash = 0;
+  for (let index = 0; index < name.length; index += 1) {
+    hash = (hash * 31 + name.charCodeAt(index)) | 0;
+  }
+  return PROJECT_TONES[Math.abs(hash) % PROJECT_TONES.length];
+}
+
 /** 分类排序：按名称，未分类始终最后。 */
 export function compareProjectNames(left, right) {
   if (left === right) return 0;
