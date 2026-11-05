@@ -1,5 +1,7 @@
 # 面板渲染预览（视觉验收用）
 
+> 说明：本目录是**历史视觉验收记录**；README 落地页使用的配图在 [`docs/images/`](../images/README.md)（同一套「真实 `client.js` + 宿主主题 token」的静态渲染，重新出图）。
+
 这里的 PNG **不是真机截图**，而是用**仓库里真实的 `lib/client.js`** + 宿主**真实主题 token**
 渲染出来的静态预览：Node 里用 jsdom + React 挂载 `main` 槽组件，把组件产出的 HTML 与
 `<style>` 抽成独立页面，再用无头 Chrome 截图（1280×820，倍率 1）。用途是：在没有浏览器
