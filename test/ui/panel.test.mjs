@@ -421,6 +421,12 @@ test('a+b+f. 页头、新建框、四视图分段、筛选计数与两行表格�
     const timeCells = [...container.querySelectorAll('.ttl-td-time')].map(textOf);
     assert.ok(timeCells.some(isTime), '创建时间应格式化为 YYYY-MM-DD HH:mm:ss');
 
+    // b1. 完成时间列双行：第一行时刻、第二行用时 / 进行中（时间账本核心指标）
+    const durationCells = textsOf(container.querySelectorAll('.ttl-time-duration'));
+    assert.ok(durationCells.some((text) => text.startsWith('用时 ')), '已完成行应显示「用时 X」');
+    assert.ok(durationCells.some((text) => text.startsWith('进行中 ')), '未完成行应显示「进行中 X」');
+    assert.equal(container.querySelectorAll('.ttl-row-more').length, 2, '每行应只有一个 ⋯ 操作入口');
+
     // b2. 固定列宽：7 个 <col>（勾选 + 标题 + 分类 + 状态 + 两列时间 + 操作）
     const cols = [...container.querySelectorAll('.ttl-table colgroup col')];
     assert.equal(cols.length, 7, '表格应有 7 个 col（固定列宽）');
@@ -642,5 +648,109 @@ test('h. 数据对话框：打开、文件预览、切换冲突策略、确认�
     const restoreCall = calls.filter((call) => call.action === 'restore').pop();
     assert.ok(restoreCall, '撤销应请求 /restore');
     assert.equal(restoreCall.body.file, 'todos.json.bak-test');
+  });
+});
+
+test('i. 工具栏固定两行：排序只留表头，视图控件与筛选各归其位', async () => {
+  await withPanel(defaultHandler(), async ({ container }) => {
+    const rows = [...container.querySelectorAll('.ttl-toolbar-row')];
+    assert.equal(rows.length, 2, '工具栏应固定两行');
+    assert.equal(container.querySelector('.ttl-sort-dir'), null, '工具栏不再有排序方向按钮');
+    assert.equal(container.querySelectorAll('.ttl-th-sortable').length, 4, '排序只保留表头 4 个可排序列');
+    // 第一行：视图分段 + 搜索；第二行：状态筛选 + 分类 / 类型筛选
+    assert.ok(rows[0].querySelector('.ttl-seg'), '第一行应是视图切换');
+    assert.ok(rows[0].querySelector('.ttl-search input'), '第一行应包含搜索框');
+    assert.ok(textOf(rows[1]).includes('全部'), '第二行应有状态筛选');
+    assert.ok(textOf(rows[1]).includes('分类筛选'), '第二行应有分类筛选');
+  });
+});
+
+test('j. 行尾 ⋯ 菜单：删除二次确认 + 撤销回插完整快照', async () => {
+  await withPanel(defaultHandler(), async ({ container, click, calls }) => {
+    const row = container.querySelector('.ttl-table-row[data-status="pending"]');
+    await click(row.querySelector('.ttl-row-more'));
+    let menu = row.querySelector('.ttl-row-menu');
+    assert.ok(menu, '点 ⋯ 应展开行内菜单');
+    assert.deepEqual(textsOf(menu.querySelectorAll('button')), ['详情', '编辑', '删除']);
+
+    await click([...menu.querySelectorAll('button')].find((button) => textOf(button) === '删除'));
+    menu = row.querySelector('.ttl-row-menu');
+    assert.deepEqual(
+      textsOf(menu.querySelectorAll('button')),
+      ['确认删除', '取消'],
+      '删除需要二次确认'
+    );
+
+    await click([...menu.querySelectorAll('button')].find((button) => textOf(button) === '确认删除'));
+    assert.ok(calls.some((call) => call.action === 'delete'), '确认后应请求 /delete');
+    const undo = findButton(container, '撤销');
+    assert.ok(undo, '删除结果应提供撤销');
+
+    await click(undo);
+    const importCall = calls.filter((call) => call.action === 'import').pop();
+    assert.ok(importCall, '撤销应通过 /import 回插');
+    assert.equal(importCall.body.mode, 'merge');
+    const restored = JSON.parse(importCall.body.content);
+    assert.equal(restored[0].id, 'todo-pending');
+    assert.equal(restored[0].createdAt, CREATED_AT, '撤销必须保留原创建时间');
+  });
+});
+
+test('k. 对话录入并入 composer：批量模式占用同一位置', async () => {
+  await withPanel(defaultHandler(), async ({ container, click }) => {
+    assert.equal(findButton(container, '对话录入'), null, '页头不再有独立对话录入入口');
+    const batch = findButton(container, '批量');
+    assert.ok(batch, 'composer 应有「批量」切换');
+    await click(batch);
+    assert.ok(container.querySelector('.ttl-chat'), '批量模式应渲染对话面板');
+    assert.equal(container.querySelector('.ttl-composer'), null, '批量模式不保留单条表单，避免两个入口并列');
+
+    await click(container.querySelector('.ttl-chat-head'));
+    assert.ok(container.querySelector('.ttl-composer'), '收起后回到单条 composer');
+    assert.equal(container.querySelector('.ttl-chat'), null);
+  });
+});
+
+test('l. 导入对话框：有文件时遮罩与 Esc 不关闭，显式关闭仍可用', async () => {
+  const handler = (action, body) => {
+    if (action !== 'import') return defaultHandler()(action);
+    return okReply({
+      format: 'json',
+      mode: body.mode,
+      dryRun: true,
+      rowCount: 1,
+      summary: { mode: body.mode, added: 1, updated: 0, skipped: 0, removed: 0, total: 1, changed: true },
+      invalid: [],
+      invalidCount: 0,
+      notices: [],
+      backup: null,
+    });
+  };
+  await withPanel(handler, async ({ container, click }) => {
+    await click(findButton(container, '数据'));
+    const dialog = container.querySelector('.ttl-dialog');
+    const input = dialog.querySelector('.ttl-file-input');
+    const file = new globalThis.window.File(['[{"title":"x"}]'], 'todos.json', { type: 'application/json' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new globalThis.window.Event('change', { bubbles: true }));
+    });
+    await settle();
+
+    const overlay = container.querySelector('.ttl-overlay');
+    await act(async () => {
+      overlay.dispatchEvent(new globalThis.window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    assert.ok(container.querySelector('.ttl-dialog'), '有文件时点遮罩不应关闭');
+
+    await act(async () => {
+      dialog.dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await settle();
+    assert.ok(container.querySelector('.ttl-dialog'), '有文件时 Esc 不应关闭');
+
+    await click(dialog.querySelector('.ttl-dialog-close'));
+    assert.equal(container.querySelector('.ttl-dialog'), null, '显式关闭仍可用');
   });
 });

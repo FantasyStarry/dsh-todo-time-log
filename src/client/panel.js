@@ -3,7 +3,7 @@ import { createDetailContent } from './detail.js';
 import { TIME_FORMAT, dateKeyOf, extractNotices, fileCacheKey, findAtToken, findHashToken, formatClock, formatFileReference, formatProjectTag, hasTagMarkup, isRecord, messageOf, normalizeChatErrors, normalizeChatSkipped, normalizeFileSuggestions, normalizeFiles, normalizePriority, normalizeProject, normalizeProjectInput, normalizeProjectSuggestions, normalizeProjects, normalizeSearch, normalizeStats, normalizeTitleInput, normalizeTodo, normalizeTodos, normalizeType, normalizeWorkspaces, notifyText, projectCacheKey, projectLabel, pruneIdMap, request, todoMatchesSearch } from './helpers.js';
 import { t } from './i18n.js';
 import { React, h } from './runtime.js';
-import { BOARD_DENSITIES, BOARD_GROUPS, CALENDAR_BASES, FILTERS, GANTT_RANGES, PRIORITIES, PROJECT_FILTER_ALL, SORTS, StyleSheet, TYPES, TYPE_FILTER_ALL, VIEWS, queryForView } from './styles.js';
+import { BOARD_DENSITIES, BOARD_GROUPS, CALENDAR_BASES, FILTERS, GANTT_RANGES, PRIORITIES, PROJECT_FILTER_ALL, StyleSheet, TYPES, TYPE_FILTER_ALL, VIEWS, queryForView } from './styles.js';
 import { createBoardView } from './views/board.js';
 import { createCalendarView } from './views/calendar.js';
 import { renderGanttView } from './views/gantt.js';
@@ -61,6 +61,8 @@ function TodoPanel() {
   const [boardGroupBy, setBoardGroupBy] = React.useState('status');
   // 六期：看板卡片「更多操作」展开项、已完成列收纳、工具栏搜索。
   const [boardActionsId, setBoardActionsId] = React.useState(null);
+  // 表格行「⋯」菜单：同一时间只展开一行；确认删除也在这个菜单里完成。
+  const [tableActionsId, setTableActionsId] = React.useState(null);
   const [boardShowAllCompleted, setBoardShowAllCompleted] = React.useState(false);
   const [search, setSearch] = React.useState('');
   // 七期：泳道折叠（键 = 列 key + 泳道 project）、密度、搜索框 ref（面板内快捷键）。
@@ -493,6 +495,35 @@ function TodoPanel() {
     }
   };
 
+  /**
+   * 撤销删除：把完整快照按裸 Todo[] 回灌 /import（merge），id、创建时间、
+   * 完成时间原样保留，不需要 Host 新增接口；导入成功后 tombstone 也会被清掉。
+   */
+  const restoreDeleted = async (todo) => {
+    if (todo === null || todo === undefined) return;
+    try {
+      const content = JSON.stringify([{
+        id: todo.id,
+        title: todo.title,
+        project: todo.project,
+        files: normalizeFiles(todo.files),
+        status: todo.status,
+        priority: todo.priority,
+        type: todo.type,
+        createdAt: todo.createdAt,
+        completedAt: todo.completedAt,
+        updatedAt: todo.updatedAt,
+      }]);
+      await request('/import', { content, mode: 'merge' });
+      if (!mountedRef.current) return;
+      showNotice('success', t('notice.restored'));
+      void fetchProjectSuggestions(workspaceRef.current, true);
+      await reload(true);
+    } catch (error) {
+      showNotice('error', messageOf(error));
+    }
+  };
+
   const handleDelete = async (todo) => {
     if (todo === null || todo === undefined || busyId !== null) return;
     setBusyId(todo.id);
@@ -500,7 +531,12 @@ function TodoPanel() {
       await request('/delete', { id: todo.id });
       if (!mountedRef.current) return;
       setConfirmId(null);
-      showNotice('success', t('notice.deleted'));
+      setTableActionsId(null);
+      showNotice('success', t('notice.deleted'), {
+        onClick: () => {
+          void restoreDeleted(todo);
+        },
+      });
       void fetchProjectSuggestions(workspaceRef.current, true);
       await reload(true);
     } catch (error) {
@@ -1566,6 +1602,7 @@ function TodoPanel() {
     calendarMonth,
     calendarSelectedDay,
     calendarYear,
+    cancelEdit,
     confirmId,
     density,
     detailIdOf,
@@ -1599,6 +1636,7 @@ function TodoPanel() {
     renderDetailContent,
     renderFileChips,
     renderRowCheck,
+    saveEdit,
     setBoardActionsId,
     setBoardLaneCollapsed,
     setBoardShowAllCompleted,
@@ -1606,9 +1644,11 @@ function TodoPanel() {
     setConfirmId,
     setEditingPriority,
     setEditingType,
+    setTableActionsId,
     sortBy,
     startEdit,
     statusBadge,
+    tableActionsId,
     titleInput,
     toggleExpanded,
     toggleGanttExpanded,
@@ -1676,39 +1716,9 @@ function TodoPanel() {
           onClick: () => setFilter(entry.value),
         },
         t(entry.labelKey),
-        h('span', { className: 'ttl-seg-count' }, String(filterCounts[entry.value] || 0))
+        h('span', { key: filterCounts[entry.value] || 0, className: 'ttl-seg-count' }, String(filterCounts[entry.value] || 0))
       )
     )
-  );
-
-  const sortSelect = h(
-    'label',
-    { className: 'ttl-select' },
-    h('span', null, t('sort.label')),
-    h(
-      'select',
-      {
-        value: sortBy,
-        'aria-label': t('sort.label'),
-        onChange: (event) => setSortBy(event.target.value),
-      },
-      SORTS.map((entry) =>
-        h('option', { key: entry.value, value: entry.value }, t(entry.labelKey))
-      )
-    )
-  );
-
-  const directionLabel = t(direction === 'asc' ? 'direction.asc' : 'direction.desc');
-  const directionToggle = h(
-    'button',
-    {
-      type: 'button',
-      className: 'ttl-sort-dir',
-      'aria-label': t('direction.toggleAria', { direction: directionLabel }),
-      title: t('direction.toggleAria', { direction: directionLabel }),
-      onClick: () => setDirection(direction === 'asc' ? 'desc' : 'asc'),
-    },
-    h('span', { 'aria-hidden': 'true' }, direction === 'asc' ? '↑' : '↓')
   );
 
   const viewToggle = h(
@@ -1968,100 +1978,10 @@ function TodoPanel() {
                 h('path', { d: 'M8 2v7m0 0l3-3m-3 3L5 6M3 12v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5V12' })
               ),
               t('transfer.open')
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'ttl-ghost-button',
-                'aria-expanded': chatOpen ? 'true' : 'false',
-                'aria-controls': chatOpen ? 'ttl-chat-panel' : undefined,
-                'aria-label': chatOpen ? t('chat.collapse') : t('chat.expand'),
-                title: chatOpen ? t('chat.collapse') : t('chat.expand'),
-                onClick: () => setChatOpen((value) => !value),
-              },
-              h(
-                'svg',
-                {
-                  className: 'ttl-ghost-button-icon',
-                  width: 12,
-                  height: 12,
-                  viewBox: '0 0 16 16',
-                  fill: 'none',
-                  stroke: 'currentColor',
-                  strokeWidth: 1.4,
-                  strokeLinecap: 'round',
-                  strokeLinejoin: 'round',
-                  'aria-hidden': 'true',
-                  focusable: 'false',
-                },
-                h('path', { d: chatOpen ? 'M4 10l4-4 4 4' : 'M4 6l4 4-4 4' })
-              ),
-              t('chat.title')
             )
           )
         ),
-        // 新建待办：整页唯一的主操作区。
-        h(
-          'form',
-          { className: 'ttl-composer', onSubmit: handleCreate, 'aria-label': t('create.aria') },
-          h('input', {
-            ref: createInputRef,
-            className: 'ttl-composer-input',
-            type: 'text',
-            value: newTitle,
-            placeholder: t('create.placeholder'),
-            'aria-label': t('create.aria'),
-            'aria-keyshortcuts': 'n',
-            disabled: creating,
-            onChange: (event) => handleCreateTitleChange(event.target.value, event.target.selectionStart),
-            onKeyDown: handleCreateKeyDown,
-            onBlur: handleCreateBlur,
-            onFocus: handleCreateFocus,
-          }),
-          suggestOpen && suggestTarget === 'create'
-            ? h(
-                'div',
-                { className: 'ttl-create-suggest' },
-                h(SuggestionDropdown, {
-                  kind: suggestKind,
-                  loading: suggestLoading,
-                  error: suggestError,
-                  suggestions: fileSuggestions,
-                  active: suggestActive,
-                  onSelect: selectCreateSuggestion,
-                })
-              )
-            : null,
-          h(ProjectPicker, {
-            value: newProject,
-            options: projectSuggestions,
-            custom: newProjectCustom,
-            disabled: creating,
-            onChange: (value) => setNewProject(value),
-            onCustom: () => setNewProjectCustom(true),
-            onBackToList: () => setNewProjectCustom(false),
-            onInputKeyDown: (event) => {
-              if (event && event.key === 'Escape') {
-                event.preventDefault();
-                event.stopPropagation();
-                setNewProjectCustom(false);
-              }
-            },
-          }),
-          prioritySelectControl(newPriority, setNewPriority, creating),
-          typeSelectControl(newType, setNewType, creating),
-          h(
-            'button',
-            {
-              type: 'submit',
-              className: 'ttl-button ttl-button-primary',
-              disabled: creating || newTitle.trim() === '',
-            },
-            creating ? t('create.actionBusy') : t('create.action')
-          )
-        ),
-        // 对话录入：按需展开的次要录入方式，默认收起，不与新建抢注意力。
+        // 捕获区：单条与批量共用同一位置；批量展开时不在列表上方再叠一层。
         chatOpen
           ? h(ChatPanel, {
               id: 'ttl-chat-panel',
@@ -2078,7 +1998,7 @@ function TodoPanel() {
               suggestionsLoading: suggestLoading,
               suggestionsError: suggestError,
               suggestionsActive: suggestActive,
-              onToggle: () => setChatOpen((value) => !value),
+              onToggle: () => setChatOpen(false),
               onChange: (value, caret) => handleChatInputChange(value, caret),
               onSend: () => {
                 void handleChatSend();
@@ -2091,7 +2011,77 @@ function TodoPanel() {
               onSuggestSelect: selectSuggestion,
               onCopyFile: copyFilePath,
             })
-          : null,
+          : h(
+              'form',
+              { className: 'ttl-composer', onSubmit: handleCreate, 'aria-label': t('create.aria') },
+              h('input', {
+                ref: createInputRef,
+                className: 'ttl-composer-input',
+                type: 'text',
+                value: newTitle,
+                placeholder: t('create.placeholder'),
+                'aria-label': t('create.aria'),
+                'aria-keyshortcuts': 'n',
+                disabled: creating,
+                onChange: (event) => handleCreateTitleChange(event.target.value, event.target.selectionStart),
+                onKeyDown: handleCreateKeyDown,
+                onBlur: handleCreateBlur,
+                onFocus: handleCreateFocus,
+              }),
+              suggestOpen && suggestTarget === 'create'
+                ? h(
+                    'div',
+                    { className: 'ttl-create-suggest' },
+                    h(SuggestionDropdown, {
+                      kind: suggestKind,
+                      loading: suggestLoading,
+                      error: suggestError,
+                      suggestions: fileSuggestions,
+                      active: suggestActive,
+                      onSelect: selectCreateSuggestion,
+                    })
+                  )
+                : null,
+              h(ProjectPicker, {
+                value: newProject,
+                options: projectSuggestions,
+                custom: newProjectCustom,
+                disabled: creating,
+                onChange: (value) => setNewProject(value),
+                onCustom: () => setNewProjectCustom(true),
+                onBackToList: () => setNewProjectCustom(false),
+                onInputKeyDown: (event) => {
+                  if (event && event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setNewProjectCustom(false);
+                  }
+                },
+              }),
+              prioritySelectControl(newPriority, setNewPriority, creating),
+              typeSelectControl(newType, setNewType, creating),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'ttl-ghost-button ttl-composer-batch',
+                  title: t('create.batchTitle'),
+                  'aria-expanded': 'false',
+                  'aria-controls': 'ttl-chat-panel',
+                  onClick: () => setChatOpen(true),
+                },
+                t('create.batch')
+              ),
+              h(
+                'button',
+                {
+                  type: 'submit',
+                  className: 'ttl-button ttl-button-primary',
+                  disabled: creating || newTitle.trim() === '',
+                },
+                creating ? t('create.actionBusy') : t('create.action')
+              )
+            ),
         // 数据区：视图切换与列表同属一张卡片。
         h(
           'div',
@@ -2099,32 +2089,38 @@ function TodoPanel() {
           h(
             'div',
             { className: 'ttl-toolbar' },
+            // 第一行固定：视图切换 + 搜索。切视图时控件位置不变。
             h(
               'div',
-              { className: 'ttl-group' },
-              viewToggle,
-              view === 'table'
-                ? filterTabs
-                : view === 'board'
-                  ? h(React.Fragment, null, boardGroupSelect, densitySelect, filterTabs)
-                  : view === 'gantt'
-                    ? rangeSelect
-                    : calendarBasisSelect
-            ),
-            h(
-              'div',
-              { className: 'ttl-group' },
-              searchInput,
-              projectFilterSelect,
-              typeFilterSelect,
-              view === 'table' ? sortSelect : null,
-              view === 'table' ? directionToggle : null,
-              view === 'calendar' ? calendarNav : null,
+              { className: 'ttl-toolbar-row' },
+              h('div', { className: 'ttl-group' }, viewToggle),
               h(
-                'span',
-                { className: 'ttl-refreshing', 'aria-live': 'polite' },
-                refreshing && listStatus !== 'loading' ? t('list.refreshing') : ''
+                'div',
+                { className: 'ttl-group' },
+                searchInput,
+                h(
+                  'span',
+                  { className: 'ttl-refreshing', 'aria-live': 'polite' },
+                  refreshing && listStatus !== 'loading' ? t('list.refreshing') : ''
+                )
               )
+            ),
+            // 第二行：左侧是当前视图专属控件，右侧始终是分类 / 类型筛选。
+            h(
+              'div',
+              { className: 'ttl-toolbar-row' },
+              h(
+                'div',
+                { className: 'ttl-group' },
+                view === 'table'
+                  ? filterTabs
+                  : view === 'board'
+                    ? h(React.Fragment, null, boardGroupSelect, densitySelect, filterTabs)
+                    : view === 'gantt'
+                      ? rangeSelect
+                      : h(React.Fragment, null, calendarBasisSelect, calendarNav)
+              ),
+              h('div', { className: 'ttl-group' }, projectFilterSelect, typeFilterSelect)
             )
           ),
           h('div', { className: 'ttl-list' }, listBody)
@@ -2170,6 +2166,8 @@ function TodoPanel() {
       open: transferOpen,
       busy: transferBusy,
       applying: transferApplying,
+      // 有文件 / 预览 / 改动过策略时，遮罩与 Esc 不再直接关闭（防误丢导入内容）。
+      dirty: transferFileName !== '' || transferContent !== '' || transferPreview !== null,
       fileName: transferFileName,
       mode: transferMode,
       preview: transferPreview,

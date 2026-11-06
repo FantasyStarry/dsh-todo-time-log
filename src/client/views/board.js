@@ -35,7 +35,7 @@ export function createBoardView(deps) {
     );
   };
 
-  const renderBoardCard = (todo) => {
+  const renderBoardCard = (todo, index) => {
     const isEditing = editingId === todo.id;
     const isConfirming = confirmId === todo.id;
     const actionsOpen = boardActionsId === todo.id;
@@ -55,6 +55,8 @@ export function createBoardView(deps) {
         key: todo.id,
         className: isEditing ? 'ttl-board-card ttl-board-card-editing' : 'ttl-board-card',
         'data-status': todo.status,
+        // 入场错位：与表格同一节奏（前 7 张，12ms 一步）。
+        style: { animationDelay: `${Math.min(index || 0, 6) * 12}ms` },
         role: 'listitem',
         onKeyDown: (event) => {
           if (!event || event.key !== 'Escape') return;
@@ -311,7 +313,7 @@ export function createBoardView(deps) {
       ),
       collapsed
         ? null
-        : h('div', { className: 'ttl-board-list', role: 'list' }, lane.items.map(renderBoardCard))
+        : h('div', { className: 'ttl-board-list', role: 'list' }, lane.items.map((todo, index) => renderBoardCard(todo, index)))
     );
   };
 
@@ -378,7 +380,7 @@ export function createBoardView(deps) {
             : h('div', { className: 'ttl-board-lanes' }, lanes.map((lane) => renderBoardLane(column, lane)))
           : visibleItems.length === 0
             ? h('p', { className: 'ttl-board-column-empty' }, t(emptyColumnKey(column)))
-            : h('div', { className: 'ttl-board-list', role: 'list' }, visibleItems.map(renderBoardCard)),
+            : h('div', { className: 'ttl-board-list', role: 'list' }, visibleItems.map((todo, index) => renderBoardCard(todo, index))),
         !lanes && hiddenCount > 0
           ? h(
               'button',

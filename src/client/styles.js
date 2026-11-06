@@ -8,13 +8,6 @@ export const FILTERS = [
   { value: 'pending', labelKey: 'filter.pending' },
   { value: 'completed', labelKey: 'filter.completed' },
 ];
-export const SORTS = [
-  { value: 'createdAt', labelKey: 'sort.createdAt' },
-  { value: 'completedAt', labelKey: 'sort.completedAt' },
-  { value: 'updatedAt', labelKey: 'sort.updatedAt' },
-  { value: 'project', labelKey: 'sort.project' },
-  { value: 'priority', labelKey: 'sort.priority' },
-];
 export const PRIORITIES = [
   { value: '', labelKey: 'priority.none' },
   { value: 'high', labelKey: 'priority.high' },
@@ -126,6 +119,11 @@ export const CSS_TEXT = `.ttl-root {
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /* 动效令牌：短、克制、只服务状态变化（入场 / 浮层 / 勾选）。 */
+  --ttl-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ttl-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ttl-dur-fast: 120ms;
+  --ttl-dur-base: 180ms;
 }
 .ttl-scroll {
   flex: 1;
@@ -206,6 +204,7 @@ export const CSS_TEXT = `.ttl-root {
   background: var(--dsw-alias-bg-layer-1);
   box-shadow: var(--dsw-shadow-lv1);
   transition: border-color 0.15s, box-shadow 0.15s;
+  animation: ttl-fade-in 160ms var(--ttl-ease-out);
 }
 .ttl-composer:hover { border-color: var(--dsw-alias-border-l3); }
 .ttl-composer:focus-within {
@@ -236,6 +235,8 @@ export const CSS_TEXT = `.ttl-root {
   color: var(--dsw-alias-label-primary);
 }
 .ttl-composer .ttl-button-primary { height: 36px; padding: 0 18px; }
+/* 「批量」是捕获区的模式切换，不是第二个主操作：保持 ghost 层级。 */
+.ttl-composer-batch { height: 32px; padding: 0 8px; }
 .ttl-create-suggest {
   position: absolute;
   top: calc(100% + 6px);
@@ -276,8 +277,9 @@ export const CSS_TEXT = `.ttl-root {
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, transform var(--ttl-dur-fast) var(--ttl-ease-out);
 }
+.ttl-button:active:not(:disabled) { transform: scale(0.98); }
 .ttl-button-primary {
   height: 34px;
   padding: 0 16px;
@@ -302,7 +304,6 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-ghost-button:focus-visible,
 .ttl-seg-item:focus-visible,
 .ttl-link:focus-visible,
-.ttl-sort-dir:focus-visible,
 .ttl-toast-action:focus-visible,
 .ttl-toast-close:focus-visible,
 .ttl-select select:focus-visible {
@@ -330,7 +331,14 @@ export const CSS_TEXT = `.ttl-root {
   border-radius: 0;
 }
 .ttl-data .ttl-list > .ttl-board { padding: 12px 12px 16px; }
+/* 工具栏固定两行：第一行视图 + 搜索；第二行视图专属控件 + 全局筛选。 */
 .ttl-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.ttl-toolbar-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -365,6 +373,9 @@ export const CSS_TEXT = `.ttl-root {
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--ttl-dur-fast) var(--ttl-ease-out),
+    color var(--ttl-dur-fast) var(--ttl-ease-out),
+    box-shadow var(--ttl-dur-fast) var(--ttl-ease-out);
 }
 .ttl-seg-item:hover { color: var(--dsw-alias-label-primary); }
 .ttl-seg-item[aria-pressed='true'] {
@@ -378,6 +389,7 @@ export const CSS_TEXT = `.ttl-root {
   font-size: 11px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  animation: ttl-count-pop 200ms var(--ttl-ease-out);
 }
 .ttl-seg-item[aria-pressed='true'] .ttl-seg-count { color: var(--dsw-alias-label-secondary); }
 .ttl-select {
@@ -397,26 +409,6 @@ export const CSS_TEXT = `.ttl-root {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-}
-.ttl-sort-dir {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: var(--dsw-radius-sm);
-  background: none;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
-.ttl-sort-dir:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 .ttl-refreshing {
   min-width: 52px;
@@ -662,6 +654,7 @@ export const CSS_TEXT = `.ttl-root {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 20px;
+  animation: ttl-fade-down 160ms var(--ttl-ease-out);
 }
 .ttl-detail-list {
   display: grid;
@@ -710,6 +703,74 @@ export const CSS_TEXT = `.ttl-root {
 }
 .ttl-link:disabled { opacity: 0.5; cursor: not-allowed; }
 .ttl-link-danger { color: var(--dsw-alias-state-error-primary); }
+/* 表格「完成时间」列双行：时刻 + 用时 / 进行中。 */
+.ttl-td-time .ttl-time-primary { display: block; line-height: 18px; }
+.ttl-time-duration {
+  display: block;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  /* 完成后这一行才出现，淡入让「用时」自然接手。 */
+  animation: ttl-fade-in 160ms var(--ttl-ease-out);
+}
+/* 表格行尾「⋯」与行内菜单：与看板卡片同一套动作模型。 */
+.ttl-row-more {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ttl-row-more:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.ttl-row-more:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 表格行尾：⋯ 在上，展开后的动作在下，整列右对齐且不撑破操作列。 */
+.ttl-table-more {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.ttl-row-menu {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0;
+  animation: ttl-fade-down var(--ttl-dur-fast) var(--ttl-ease-out);
+}
+.ttl-row-menu-item {
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ttl-row-menu-item:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.ttl-row-menu-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.ttl-row-menu-item-danger { color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 78%, transparent); }
+.ttl-row-menu-item-danger:hover { color: var(--dsw-alias-state-error-primary); }
+.ttl-row-edit-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+/* 行内编辑时状态列改为两个紧凑选择器（可见标签隐藏，aria-label 仍在）。 */
+.ttl-edit-status { display: flex; align-items: center; gap: 4px; }
+.ttl-edit-status .ttl-select > span { display: none; }
+.ttl-edit-status .ttl-select select { max-width: 78px; font-size: 12px; }
 .ttl-edit-input {
   flex: 1;
   height: 30px;
@@ -726,6 +787,7 @@ export const CSS_TEXT = `.ttl-root {
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
   line-height: 20px;
+  animation: ttl-fade-in var(--ttl-dur-base) var(--ttl-ease-out);
 }
 
 .ttl-placeholder-title {
@@ -1023,6 +1085,8 @@ export const CSS_TEXT = `.ttl-root {
   height: 16px;
   border-radius: 8px;
   overflow: hidden;
+  /* 时间条从左向右「画」出来，呼应创建 → 完成的时间方向。 */
+  animation: ttl-bar-draw 420ms var(--ttl-ease-out) both;
 }
 .ttl-gantt-bar-completed { background: var(--dsw-alias-state-success-secondary); }
 .ttl-gantt-bar-ongoing {
@@ -1041,12 +1105,14 @@ export const CSS_TEXT = `.ttl-root {
   font-size: 10px;
   line-height: 1;
   white-space: nowrap;
-}.ttl-chat {
+}
+.ttl-chat {
   margin-bottom: 16px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
   overflow: hidden;
+  animation: ttl-fade-in 160ms var(--ttl-ease-out);
 }
 
 .ttl-chat-headrow {
@@ -1208,6 +1274,8 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-table-row {
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
   transition: background 0.12s ease-out;
+  /* 新行 / 切视图时淡入；animation-delay 由行索引注入，形成轻错位。 */
+  animation: ttl-fade-in var(--ttl-dur-base) var(--ttl-ease-out) both;
 }
 .ttl-table-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .ttl-table tbody tr:last-child { border-bottom: 0; }
@@ -1376,11 +1444,13 @@ export const CSS_TEXT = `.ttl-root {
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: 12px;
   background: var(--dsw-alias-bg-base);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.16s var(--ttl-ease-out);
+  animation: ttl-rise-in 200ms var(--ttl-ease-out) backwards;
 }
 .ttl-board-card:hover {
   border-color: var(--dsw-alias-border-l3);
   box-shadow: var(--dsw-shadow-lv1);
+  transform: translateY(-1px);
 }
 .ttl-board-card-editing { padding: 9px 10px; }
 .ttl-board-card-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -1432,6 +1502,13 @@ export const CSS_TEXT = `.ttl-root {
 }
 .ttl-check:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
 .ttl-check:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 勾选：对勾从 0.55 弹到 1；只在状态切换时过渡，首屏不会逐个弹。 */
+.ttl-check svg {
+  transform: scale(0.55);
+  transform-origin: 50% 50%;
+  transition: transform 200ms var(--ttl-ease-spring);
+}
+.ttl-check[data-checked='true'] svg { transform: scale(1); }
 .ttl-board-check { position: absolute; top: 8px; left: 8px; }
 .ttl-board-more {
   position: absolute;
@@ -1596,6 +1673,7 @@ export const CSS_TEXT = `.ttl-root {
   padding: 6px 8px;
   border-radius: 8px;
   background: var(--dsw-alias-bg-module-platform);
+  animation: ttl-fade-in var(--ttl-dur-base) var(--ttl-ease-out) both;
 }
 .ttl-calendar-entry-main {
   display: flex;
@@ -1716,6 +1794,7 @@ export const CSS_TEXT = `.ttl-root {
   justify-content: center;
   padding: 24px;
   background: var(--dsw-alias-bg-mask-1);
+  animation: ttl-fade-in 140ms ease-out;
 }
 .ttl-dialog {
   display: flex;
@@ -1727,6 +1806,7 @@ export const CSS_TEXT = `.ttl-root {
   background: var(--dsw-alias-bg-base);
   box-shadow: var(--dsw-shadow-lv3);
   overflow: hidden;
+  animation: ttl-dialog-in 200ms var(--ttl-ease-out) both;
 }
 .ttl-dialog-head {
   display: flex;
@@ -1854,15 +1934,39 @@ export const CSS_TEXT = `.ttl-root {
 @media (max-width: 560px) {
   .ttl-overlay { align-items: flex-start; padding: 12px; }
 }
+/* ===== 动效关键帧：短、克制，只服务状态变化 ===== */
+@keyframes ttl-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ttl-rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ttl-fade-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ttl-dialog-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ttl-count-pop {
+  from { opacity: 0.4; transform: translateY(-2px) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ttl-bar-draw {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ttl-input,
-  .ttl-button,
-  .ttl-ghost-button,
-  .ttl-detail-toggle svg,
-  .ttl-chat-chevron,
-  .ttl-ghost-button-icon { transition: none; }
-  .ttl-skeleton-bar { animation: none; }
-  .ttl-toast { animation: none; }
+  .ttl-root *,
+  .ttl-root *::before,
+  .ttl-root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 @media (max-width: 720px) {
   .ttl-detail-list { grid-template-columns: auto minmax(0, 1fr); }

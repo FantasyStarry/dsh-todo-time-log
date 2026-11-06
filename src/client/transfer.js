@@ -69,6 +69,7 @@ export function TransferDialog(props) {
     open,
     busy,
     applying,
+    dirty,
     fileName,
     mode,
     preview,
@@ -91,7 +92,11 @@ export function TransferDialog(props) {
   const activeMode = TRANSFER_MODES.find((option) => option.value === mode) ?? TRANSFER_MODES[0];
   const canConfirm = summary !== null && busy !== true && applying !== true;
 
+  // 已经选文件 / 有预览 / 改过冲突策略后，遮罩与 Esc 不再关闭对话框：这些内容
+  // 只在内存里，误关就要重新选文件。关闭按钮仍可用，属于显式操作。
+  const canDismissBackdrop = dirty !== true && busy !== true && applying !== true;
   const backdrop = (event) => {
+    if (!canDismissBackdrop) return;
     if (event && event.target === event.currentTarget) onClose();
   };
 
@@ -108,7 +113,7 @@ export function TransferDialog(props) {
         onKeyDown: (event) => {
           if (event && event.key === 'Escape') {
             event.stopPropagation();
-            onClose();
+            if (canDismissBackdrop) onClose();
           }
         },
       },
