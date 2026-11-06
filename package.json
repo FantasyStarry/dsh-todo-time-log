@@ -1,6 +1,6 @@
 {
   "name": "dsh-todo-time-log",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "DeepSeek Harness 待办插件：自动记录每条待办的创建与完成时间，四视图（表格 / 看板 / 甘特图 / 日历）呈现真实耗时（Todo time log for DeepSeek Harness）",
   "keywords": [
     "dsh",
