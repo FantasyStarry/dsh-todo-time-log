@@ -10,10 +10,10 @@
 
 ```bash
 npm run build     # esbuild：src/client/ → lib/client.js（单文件产物）
-npm run check     # 六个 lib 文件（time/parse/files/store/index/client）的 node --check
+npm run check     # 七个 lib 文件（time/parse/files/store/transfer/index/client）的 node --check
 npm run lint      # ESLint（flat config；构建产物 lib/client.js 不直接 lint，lint src/client/）
 npm run typecheck # tsc --checkJs：Host 模块的 JSDoc 类型检查
-npm test          # node:test：解析 / 数据层 / HTTP / UI 渲染 / 并发写入（342 用例）
+npm test          # node:test：解析 / 数据层 / HTTP / 导入导出 / UI 渲染 / 并发写入（456 用例）
 npm run test:coverage  # 同上 + Node 内置覆盖率（--experimental-test-coverage）
 npm run audit     # client.js 静态审计（28 项）
 npm run verify    # 以上全套（build + check + lint + typecheck + test + audit；prepublishOnly 同）
@@ -24,9 +24,12 @@ npm run verify    # 以上全套（build + check + lint + typecheck + test + aud
 - `test/parse.test.mjs`（79 用例）：多条拆分、分类标记最左优先且全部剥离、`@文件` 与 `@分类` 判定、文件路径归一化/拒绝绝对与穿越路径、分类派生规则、**优先级标记**（`!high/!medium/!low`、别名与中文、最左优先、`!important` 不误判）、**类型标记**（`^bug/^feature/...`、中文别名、`类型：bug`/`type:bug`、未知值不误判）、工具 `quick_add` 路径。
 - `test/smoke.test.mjs`（174 用例）：创建/校验/完成/重复完成/取消完成/重复取消/改名/删除/筛选/排序（含空值置尾）/stats、时间格式与空值、损坏 JSON 备份重建、结构异常 JSON 归档、重复 id 拆分、记录修复（缺 createdAt、完成早于创建、非法状态、非法 priority/type）、修复提示只投递一次、持久化重载、`resolveDataFile` 优先级、分类校验/归一化/筛选/统计/按分类排序（未分类置尾）、**priority/type 校验/归一化/部分更新**、按优先级排序（未设置置尾）、`files` 校验与派生分类、v1–v4→v5 迁移落盘、不支持版本归档。
 - `test/http.test.mjs`（77 用例）：真实 HTTP 服务上的 prefix 路由、GET health、错误码映射（400/404/405/409）、非法 JSON、数组 body、「HTTP 写入后重新加载可读」，分类/优先级/类型的非法值 400、`sortBy=priority`、只改 priority/type，以及 `/quick-add`（多条 + `#分类` + `@文件` + `!优先级` + `^类型` 标记与表单回退）、`/create` 带 `files`/`priority`/`type`、`/files` 无文件服务时 501；宿主认证（`authorize` 返回 401 → 所有路由 401 + `UNAUTHORIZED` 信封、403 → 403、admission 抛错 → 403、放行 → 正常）。
+- `test/transfer.test.mjs`（42 用例）：JSON 信封的导出/回导、CSV 的 BOM/CRLF/逗号与引号转义、`files` 分号分隔、耗时派生列、本地时间解析、中英文表头别名、v1 迁移、裸数组、重复 id 取新、非法行计数与行号、空内容/坏 JSON/版本不支持/缺标题列/未知格式拒绝。
+- `test/store-import.test.mjs`（36 用例）：`dryRun` 不写盘、合并（新者胜/旧者跳过）、仅新增、覆盖全部 + 备份文件、撤销恢复 + 安全备份、`refresh()` 合并另一实例写入、备份名与路径穿越校验、5000 条上限。
+- `test/http-transfer.test.mjs`（35 用例）：`/export` JSON/CSV 内容与元信息、非法格式 400、`/import` dryRun/正式导入/重复导入/CSV/错误码/未知模式回退、`/restore` 回滚与非法文件名 400。
 - `test/store-concurrency.test.mjs`（8 用例）：两个实例交错写同一数据文件时 mtime 合并、同 id 取 `updatedAt` 较新者、`Promise.all` 并发写不损坏不丢、tombstone 防删除复活、陈旧锁清理、锁占用超时后下次写入补齐、写前发现损坏数据不重复归档。
-- `test/ui/panel.test.mjs`（4 用例）：jsdom + 真实 React 18 渲染构建产物 `lib/client.js`；覆盖页头/新建框/四视图分段/筛选计数、表格行与时间格式、空态、错误态与重试恢复、看板切换与两列。jsdom 无布局/绘制，视觉回归仍需真机或 Playwright（本轮未接入）。
-- `test/client-audit.mjs`（28 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册。当前口径：**253 键/语言、27 个 alias token、194 个 `ttl-` className**。
+- `test/ui/panel.test.mjs`（5 用例）：jsdom + 真实 React 18 渲染构建产物 `lib/client.js`；覆盖页头/新建框/四视图分段/筛选计数、表格行与时间格式、空态、错误态与重试恢复、看板切换与两列、**「数据」对话框的打开 / 文件预览 / 策略切换 / 确认导入 / 撤销**。jsdom 无布局/绘制，视觉回归仍需真机或 Playwright（本轮未接入）。
+- `test/client-audit.mjs`（28 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册。当前口径：**289 键/语言、27 个 alias token、219 个 `ttl-` className**。
 - `test/live-utf8.py` / `test/live-projects.py`：对**运行中实例**的真实往返（中文标题、分类筛选、迁移版本落盘、清理测试数据），需设置 `DSH_WEB_URL`（默认 `http://127.0.0.1:52283`）。
 
 **CI（`.github/workflows/ci.yml`）**：push / PR 触发，矩阵 Node 20 / 22 / 24 × Ubuntu / Windows，依次跑 `check`、`lint`、`typecheck`、`build`、`test`、`audit`；Linux 上额外用 `git diff --exit-code -- lib/client.js` 校验构建产物与源码同步，另有 Node 24 覆盖率 job。发布工作流同样先 `npm ci` 再跑 `build` + 测试 + 审计。
@@ -130,6 +133,16 @@ UI 手测清单（八期：类型标签，**需刷新页面 + 重启插件**）�
 3. **筛选与搜索**：工具栏「类型筛选」选「缺陷」→ 只剩类型为缺陷的条目（清空筛选恢复）；搜索「缺陷」也能命中类型名。
 4. **`@` 菜单点选（不用手打标记）**：在主输入框草稿以 `/todo ` 开头时输入 `@` → 菜单出现「待办分类 / 待办优先级 / 待办类型」三组；选中「高」插入 `!high `、选中「缺陷」插入 `^bug `，继续输入标题即可。
 5. **v5 迁移**：v4 数据文件首次写入后变 `version: 5`，旧待办 `type` 为空；`update {type:"urgent"}` 返回 400 `TYPE_INVALID`。
+
+UI 手测清单（九期：导入 / 导出，**需重启插件 + 刷新页面**）：
+
+1. **导出**：点页头「数据」→ 分别导出 JSON / CSV；JSON 能被文本编辑器打开且 `version: 5`；CSV 用 Excel/WPS 直接打开，中文不乱码、`耗时(分钟)` 列有值、未完成项的完成时间与耗时为空白。
+2. **预览**：导出的 JSON 原样再导入 → 预览应显示「新增 0 / 更新 0 / 跳过 N」，说明无损回导；手工改一条标题或 `updatedAt` 后再导入 → 预览显示「更新 1」。
+3. **策略**：把策略切到「仅新增」→ 预览「跳过 N」；切到「覆盖全部」→ 预览出现「移除」计数；确认后列表只剩文件里的记录，数据目录出现 `<dataFile>.bak-<时间戳>`。
+4. **撤销**：导入结果 toast 点「撤销」→ 列表恢复到导入前，并再生成一份安全备份。
+5. **CSV 导入**：用 Excel 新增一行（标题、分类、状态「未完成/已完成」、优先级「高/中/低」、类型「缺陷/新功能…」、创建时间 `YYYY-MM-DD HH:mm:ss`），另存为 CSV 后导入 → 预览与列表都能正确识别中文值。
+6. **异常**：导入空文件 / 坏 JSON / 版本 99 / 缺少标题列的 CSV → 对话框内给出明确错误且不写盘；恢复不存在的 `.bak-*` 返回「备份文件名不合法」提示。
+7. **并发**：打开第二个 DSH 窗口写入一条待办后，在第一个窗口直接导出 → 导出内容应包含第二条（导出前会先合并磁盘写入）。
 
 ---
 

@@ -8,6 +8,7 @@ import { createBoardView } from './views/board.js';
 import { createCalendarView } from './views/calendar.js';
 import { renderGanttView } from './views/gantt.js';
 import { createTableView } from './views/table.js';
+import { TransferDialog, makeDownload, readFileText } from './transfer.js';
 import { ChatPanel, CheckButton, ErrorPlaceholder, FileChip, LoadingPlaceholder, ProjectPicker, SuggestionDropdown, TextPlaceholder, ToastIcon } from './widgets.js';
 
 export /** 面板主体。所有请求与交互状态都在这里，接口异常不会抛到槽位。 */
@@ -28,6 +29,16 @@ function TodoPanel() {
   const [editTitle, setEditTitle] = React.useState('');
   const [confirmId, setConfirmId] = React.useState(null);
   const [notice, setNotice] = React.useState(null);
+  // 九期：导入 / 导出。对话框内先预览、确认后才写入；导入前 Host 会自动备份。
+  const [transferOpen, setTransferOpen] = React.useState(false);
+  const [transferBusy, setTransferBusy] = React.useState(false);
+  const [transferApplying, setTransferApplying] = React.useState(false);
+  const [transferError, setTransferError] = React.useState('');
+  const [transferFileName, setTransferFileName] = React.useState('');
+  const [transferContent, setTransferContent] = React.useState('');
+  const [transferMode, setTransferMode] = React.useState('merge');
+  const [transferPreview, setTransferPreview] = React.useState(null);
+  const [download, setDownload] = React.useState({ url: '', name: '' });
   // 展开的详情按 todo.id 记录；列表刷新时只保留仍存在的 id。
   const [expandedIds, setExpandedIds] = React.useState({});
   // 二期：视图 / 范围 / 分类筛选 / 分类列表 / 新建与编辑的分类输入 / 对话录入。
@@ -101,6 +112,8 @@ function TodoPanel() {
   const projectSeqRef = React.useRef(0);
   const suggestKindRef = React.useRef('file');
   const createBlurTimerRef = React.useRef(null);
+  const transferInputRef = React.useRef(null);
+  const downloadRef = React.useRef(null);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -135,6 +148,27 @@ function TodoPanel() {
     }, delay);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  /**
+   * 触发下载：隐藏的 <a download> 由 ref 点击，不在代码里直接操作 document。
+   * 创建 blob URL 后延迟回收，避免浏览器还没开始读取就被 revoke。
+   */
+  React.useEffect(() => {
+    if (download.url === '' || downloadRef.current === null) return undefined;
+    downloadRef.current.click();
+    const url = download.url;
+    const timer = setTimeout(() => {
+      try {
+        if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+          URL.revokeObjectURL(url);
+        }
+      } catch {
+        /* best effort */
+      }
+      if (mountedRef.current) setDownload({ url: '', name: '' });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [download]);
 
   /**
    * 拉取列表。seq 保证只有最后一次请求能写状态；quiet 用于操作后的静默刷新。
@@ -1362,6 +1396,139 @@ function TodoPanel() {
     }
   };
 
+  const openTransfer = () => {
+    if (transferBusy) return;
+    setTransferError('');
+    setTransferPreview(null);
+    setTransferFileName('');
+    setTransferContent('');
+    setTransferMode('merge');
+    setTransferOpen(true);
+  };
+
+  const closeTransfer = () => {
+    if (transferBusy) return;
+    setTransferOpen(false);
+  };
+
+  /** 预览与正式导入共用 /import；dryRun 只算差异，不写盘。 */
+  const runImportPreview = async (content, mode) => {
+    setTransferBusy(true);
+    setTransferError('');
+    try {
+      const value = await request('/import', { content, mode, dryRun: true });
+      if (!mountedRef.current) return;
+      setTransferPreview(value);
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setTransferPreview(null);
+      setTransferError(messageOf(error));
+    } finally {
+      if (mountedRef.current) setTransferBusy(false);
+    }
+  };
+
+  const handleTransferModeChange = (nextMode) => {
+    if (transferBusy || transferContent === '') return;
+    setTransferMode(nextMode);
+    void runImportPreview(transferContent, nextMode);
+  };
+
+  const handleExport = async (format) => {
+    if (transferBusy) return;
+    setTransferBusy(true);
+    setTransferError('');
+    try {
+      const value = await request('/export', { format });
+      if (!mountedRef.current) return;
+      setDownload(makeDownload(value.content, value.filename, value.mime));
+      showNotice('success', t('transfer.exported', {
+        count: Number(value.count) || 0,
+        format: String(value.format || format).toUpperCase(),
+      }));
+      setTransferOpen(false);
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setTransferError(messageOf(error));
+    } finally {
+      if (mountedRef.current) setTransferBusy(false);
+    }
+  };
+
+  const handlePickFile = () => {
+    const input = transferInputRef.current;
+    if (input && typeof input.click === 'function') input.click();
+  };
+
+  const handleImportFileChange = async (event) => {
+    const target = event && event.target ? event.target : null;
+    const files = target && target.files ? target.files : null;
+    const file = files && files.length > 0 ? files[0] : null;
+    // 允许再次选择同一个文件：清空 input 的值不会影响已经读到的 File。
+    if (target) target.value = '';
+    if (file === null) return;
+    let content = '';
+    try {
+      content = await readFileText(file);
+    } catch (error) {
+      if (mountedRef.current) setTransferError(t('transfer.readError', { message: messageOf(error) }));
+      return;
+    }
+    if (!mountedRef.current) return;
+    if (content.trim() === '') {
+      setTransferPreview(null);
+      setTransferError(t('transfer.emptyFile'));
+      return;
+    }
+    setTransferFileName(typeof file.name === 'string' ? file.name : '');
+    setTransferContent(content);
+    void runImportPreview(content, transferMode);
+  };
+
+  const handleRestoreBackup = async (backupFile) => {
+    if (typeof backupFile !== 'string' || backupFile === '') return;
+    try {
+      const value = await request('/restore', { file: backupFile });
+      if (!mountedRef.current) return;
+      showNotice('success', notifyText(value, 'transfer.undone'));
+      void fetchProjectSuggestions(workspaceRef.current, true);
+      await reload(true);
+    } catch (error) {
+      showNotice('error', messageOf(error));
+    }
+  };
+
+  const handleImportConfirm = async () => {
+    if (transferBusy || transferContent === '') return;
+    setTransferBusy(true);
+    setTransferApplying(true);
+    setTransferError('');
+    try {
+      const value = await request('/import', { content: transferContent, mode: transferMode });
+      if (!mountedRef.current) return;
+      setTransferOpen(false);
+      setTransferPreview(null);
+      setTransferContent('');
+      setTransferFileName('');
+      const backup = value && typeof value.backup === 'string' ? value.backup : '';
+      showNotice('success', notifyText(value, 'transfer.imported'), backup === '' ? undefined : {
+        onClick: () => {
+          void handleRestoreBackup(backup);
+        },
+      });
+      void fetchProjectSuggestions(workspaceRef.current, true);
+      await reload(true);
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setTransferError(messageOf(error));
+    } finally {
+      if (mountedRef.current) {
+        setTransferBusy(false);
+        setTransferApplying(false);
+      }
+    }
+  };
+
   const shiftCalendarMonth = (delta) => {
     const total = calendarYear * 12 + calendarMonth + delta;
     setCalendarYear(Math.floor(total / 12));
@@ -1745,6 +1912,15 @@ function TodoPanel() {
     'div',
     { className: 'ttl-root', 'data-dsh-todo-time-log': 'panel', onKeyDown: handlePanelKeyDown },
     h(StyleSheet),
+    // 下载锚点：makeDownload() 生成 blob URL 后由 effect 通过 ref 点击。
+    h('a', {
+      ref: downloadRef,
+      className: 'ttl-download-anchor',
+      href: download.url === '' ? undefined : download.url,
+      download: download.name === '' ? undefined : download.name,
+      'aria-hidden': 'true',
+      tabIndex: -1,
+    }),
     h(
       'div',
       { className: 'ttl-scroll' },
@@ -1764,6 +1940,35 @@ function TodoPanel() {
           h(
             'div',
             { className: 'ttl-heading-actions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'ttl-ghost-button',
+                'aria-haspopup': 'dialog',
+                'aria-expanded': transferOpen ? 'true' : 'false',
+                title: t('transfer.open'),
+                onClick: openTransfer,
+              },
+              h(
+                'svg',
+                {
+                  className: 'ttl-ghost-button-icon',
+                  width: 12,
+                  height: 12,
+                  viewBox: '0 0 16 16',
+                  fill: 'none',
+                  stroke: 'currentColor',
+                  strokeWidth: 1.4,
+                  strokeLinecap: 'round',
+                  strokeLinejoin: 'round',
+                  'aria-hidden': 'true',
+                  focusable: 'false',
+                },
+                h('path', { d: 'M8 2v7m0 0l3-3m-3 3L5 6M3 12v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5V12' })
+              ),
+              t('transfer.open')
+            ),
             h(
               'button',
               {
@@ -1960,7 +2165,23 @@ function TodoPanel() {
               '×'
             )
           )
-    )
+    ),
+    h(TransferDialog, {
+      open: transferOpen,
+      busy: transferBusy,
+      applying: transferApplying,
+      fileName: transferFileName,
+      mode: transferMode,
+      preview: transferPreview,
+      error: transferError,
+      fileInputRef: transferInputRef,
+      onClose: closeTransfer,
+      onExport: handleExport,
+      onPickFile: handlePickFile,
+      onFileChange: handleImportFileChange,
+      onModeChange: handleTransferModeChange,
+      onConfirm: handleImportConfirm,
+    })
   );
 }
 

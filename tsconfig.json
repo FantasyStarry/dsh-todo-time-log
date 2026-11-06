@@ -18,6 +18,7 @@
     "lib/parse.js",
     "lib/files.js",
     "lib/store.js",
+    "lib/transfer.js",
     "lib/index.js"
   ]
 }

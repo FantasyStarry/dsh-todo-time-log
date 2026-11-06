@@ -50,6 +50,12 @@ export const BOARD_DENSITIES = [
   { value: 'comfortable', labelKey: 'board.densityComfortable' },
   { value: 'compact', labelKey: 'board.densityCompact' },
 ];
+/** 导入冲突处理：合并（默认）/ 仅新增 / 覆盖全部。 */
+export const TRANSFER_MODES = [
+  { value: 'merge', labelKey: 'transfer.modeMerge', hintKey: 'transfer.modeMergeHint' },
+  { value: 'add', labelKey: 'transfer.modeAdd', hintKey: 'transfer.modeAddHint' },
+  { value: 'replace', labelKey: 'transfer.modeReplace', hintKey: 'transfer.modeReplaceHint' },
+];
 /** 「已完成」列默认收纳的最近条数；超过后折叠为「显示全部」。 */
 export const BOARD_COMPLETED_LIMIT = 10;
 export const CALENDAR_BASES = [
@@ -1691,6 +1697,163 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-board-card-files { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .ttl-calendar-entry-files { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 4px; }
 .ttl-detail-files { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* 导入 / 导出：轻量浮层对话框，内容超高时只滚动对话框主体。 */
+.ttl-download-anchor {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.ttl-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--dsw-alias-bg-mask-1);
+}
+.ttl-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: 100%;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-shadow-lv3);
+  overflow: hidden;
+}
+.ttl-dialog-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+}
+.ttl-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+.ttl-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ttl-dialog-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.ttl-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.ttl-dialog-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+}
+.ttl-transfer-section { display: flex; flex-direction: column; gap: 8px; }
+.ttl-transfer-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+.ttl-transfer-hint { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.ttl-dialog-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ttl-dialog-actions-end { justify-content: flex-end; padding-top: 4px; }
+.ttl-transfer-file {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+.ttl-file-input { display: none; }
+.ttl-transfer-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-sm);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.ttl-transfer-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.ttl-transfer-preview-title { font-size: 12px; font-weight: 600; line-height: 18px; color: var(--dsw-alias-label-primary); }
+.ttl-transfer-counts { display: flex; flex-wrap: wrap; gap: 6px; }
+.ttl-transfer-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.ttl-transfer-rows { margin: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.ttl-transfer-invalid {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 11px;
+  line-height: 17px;
+}
+.ttl-transfer-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.ttl-transfer-mode select {
+  height: 28px;
+  padding: 0 6px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ttl-transfer-mode-hint { margin: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.ttl-transfer-empty { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.ttl-overlay .ttl-button { height: 28px; font-size: 12px; }
+@media (max-width: 560px) {
+  .ttl-overlay { align-items: flex-start; padding: 12px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .ttl-input,
   .ttl-button,

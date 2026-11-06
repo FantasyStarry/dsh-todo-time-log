@@ -141,6 +141,7 @@ function installDom() {
     HTMLInputElement: window.HTMLInputElement,
     Element: window.Element,
     Node: window.Node,
+    FileReader: window.FileReader,
     Event: window.Event,
     MouseEvent: window.MouseEvent,
     KeyboardEvent: window.KeyboardEvent,
@@ -527,5 +528,119 @@ test('e. 点击「看板」分段后切换到看板视图并出现看板列', as
     assert.equal(container.querySelector('.ttl-table-row'), null, '看板视图不应残留表格行');
     // 切换视图会按看板查询参数重新拉取 /list
     assert.ok(calls.filter((call) => call.action === 'list').length >= 2, '切换视图应重新请求 /list');
+  });
+});
+
+test('h. 数据对话框：打开、文件预览、切换冲突策略、确认导入与撤销', async () => {
+  const summary = { mode: 'merge', added: 2, updated: 0, skipped: 1, removed: 0, total: 2, changed: true };
+  const handler = (action, body) => {
+    if (action === 'export') {
+      return okReply({
+        format: body.format,
+        filename: 'todos-20261106-0900.json',
+        mime: 'application/json',
+        count: 2,
+        content: '{}',
+      });
+    }
+    if (action === 'import') {
+      if (body.dryRun === true) {
+        return okReply({
+          format: 'json',
+          mode: body.mode,
+          dryRun: true,
+          rowCount: 3,
+          summary: { ...summary, mode: body.mode },
+          invalid: [],
+          invalidCount: 0,
+          notices: [],
+          backup: null,
+        });
+      }
+      return okReply({
+        format: 'json',
+        mode: body.mode,
+        dryRun: false,
+        rowCount: 3,
+        summary,
+        invalid: [],
+        invalidCount: 0,
+        notices: ['导入完成：新增 2 条'],
+        backup: 'todos.json.bak-test',
+        persisted: true,
+      });
+    }
+    if (action === 'restore') {
+      return okReply({ restored: 2, notices: ['已从备份恢复 2 条待办'] });
+    }
+    return defaultHandler()(action);
+  };
+
+  await withPanel(handler, async ({ container, click, calls }) => {
+    const dataButton = findButton(container, '数据');
+    assert.ok(dataButton, '页头应有「数据」按钮');
+    assert.equal(dataButton.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(dataButton.getAttribute('aria-expanded'), 'false');
+    await click(dataButton);
+    assert.equal(dataButton.getAttribute('aria-expanded'), 'true');
+
+    const dialog = container.querySelector('.ttl-dialog');
+    assert.ok(dialog, '点击「数据」后应打开对话框');
+    assert.equal(dialog.getAttribute('role'), 'dialog');
+    assert.equal(textOf(dialog.querySelector('.ttl-dialog-title')), '导入 / 导出');
+    assert.ok(findButton(dialog, '导出 JSON'), '对话框应有 JSON 导出按钮');
+    assert.ok(findButton(dialog, '导出 CSV'), '对话框应有 CSV 导出按钮');
+    const initialConfirm = findButton(dialog, '开始导入');
+    assert.ok(initialConfirm, '对话框底部应始终有「开始导入」');
+    assert.equal(initialConfirm.disabled, true, '未选择文件时导入按钮应禁用');
+
+    // 选择文件 → 自动 dryRun 预览
+    const input = dialog.querySelector('.ttl-file-input');
+    assert.ok(input, '应有隐藏文件输入框');
+    const payload = JSON.stringify({ version: 5, todos: [{ id: 'ttl_ui1', title: 'UI 导入' }] });
+    const file = new globalThis.window.File([payload], 'todos.json', { type: 'application/json' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    await act(async () => {
+      input.dispatchEvent(new globalThis.window.Event('change', { bubbles: true }));
+    });
+    await settle();
+
+    const preview = dialog.querySelector('.ttl-transfer-preview');
+    assert.ok(preview, '选择文件后应显示预览');
+    assert.deepEqual(
+      textsOf(preview.querySelectorAll('.ttl-transfer-count')),
+      ['新增 2', '更新 0', '跳过 1', '合计 2']
+    );
+    const dryCall = calls.filter((call) => call.action === 'import').pop();
+    assert.equal(dryCall.body.dryRun, true, '预览应使用 dryRun');
+    assert.equal(dryCall.body.mode, 'merge');
+
+    // 切换冲突策略 → 用新策略重新预览
+    const select = preview.querySelector('select');
+    await act(async () => {
+      select.value = 'replace';
+      select.dispatchEvent(new globalThis.window.Event('change', { bubbles: true }));
+    });
+    await settle();
+    const replaceCall = calls.filter((call) => call.action === 'import').pop();
+    assert.equal(replaceCall.body.mode, 'replace');
+    assert.equal(replaceCall.body.dryRun, true);
+
+    // 确认导入 → 关闭对话框、弹出结果与撤销
+    const confirm = findButton(dialog, '开始导入');
+    assert.ok(confirm, '预览后应有「开始导入」');
+    assert.equal(confirm.disabled, false);
+    await click(confirm);
+    const applyCall = calls.filter((call) => call.action === 'import' && call.body.dryRun !== true).pop();
+    assert.ok(applyCall, '确认后应发起正式导入');
+    assert.equal(container.querySelector('.ttl-dialog'), null, '导入成功后应关闭对话框');
+    assert.ok(container.querySelector('.ttl-toast'), '应弹出结果提示');
+
+    const undo = findButton(container, '撤销');
+    assert.ok(undo, '导入结果应提供撤销');
+    await click(undo);
+    const restoreCall = calls.filter((call) => call.action === 'restore').pop();
+    assert.ok(restoreCall, '撤销应请求 /restore');
+    assert.equal(restoreCall.body.file, 'todos.json.bak-test');
   });
 });

@@ -24,6 +24,7 @@ dsh-todo-time-log/
 │   ├── helpers.js          # 时间 / 格式化 / 甘特几何等纯函数
 │   ├── i18n.js             # zh / en 文案字典
 │   ├── styles.js           # CSS（--dsw-alias-* 主题 token）
+│   ├── transfer.js         # 导入 / 导出对话框 + 文件读取 / 下载辅助
 │   ├── sources.js          # /todo 输入触发来源（@ 菜单）
 │   └── runtime.js          # React 注入层（factory 里 setReact）
 ├── scripts/
@@ -34,20 +35,24 @@ dsh-todo-time-log/
 │   ├── time.js             # ★ 时间解析 / 本地格式化 YYYY-MM-DD HH:mm:ss / 空值
 │   ├── parse.js            # ★ 统一自然语言解析（对话面板 / /todo 命令共用）
 │   ├── files.js            # ★ 工作区文件索引（ctx.fs 只读遍历 + 缓存，供 @ 补全）
+│   ├── transfer.js         # ★ 导入 / 导出格式：JSON 信封 + CSV 读写（纯函数）
 │   └── client.js           # 构建产物（勿手改；由 src/client/ 打包生成，仍是单文件模块表）
 ├── test/
 │   ├── parse.test.mjs      # 自然语言解析 / 文件路径 / 分类派生（79 用例，node:test）
 │   ├── smoke.test.mjs      # 数据层 / 时间 / 修复 / 分类 / 文件 / 迁移 / 持久化（174 用例）
 │   ├── http.test.mjs       # 真实 HTTP 路由端到端（77 用例，含宿主认证 401/403）
+│   ├── transfer.test.mjs   # 导出 / 导入格式：JSON v1–v5、CSV 转义、别名、非法行
+│   ├── store-import.test.mjs # 导入合并策略 / 备份 / 撤销 / 数量上限
+│   ├── http-transfer.test.mjs # /export、/import、/restore 端到端
 │   ├── store-concurrency.test.mjs  # 跨进程写入：mtime 合并 + 文件锁（8 用例）
-│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（4 用例）
+│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（5 用例）
 │   ├── live-utf8.py        # 对运行中实例的真实 UTF-8 往返检查（需 DSH_WEB_URL）
 │   ├── live-projects.py    # 对运行中实例的分类/迁移/筛选真实往返检查
 │   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图）
 ├── docs/
 │   ├── architecture.md     # 架构与关键代码：目录结构 / 数据模型 / 双调用方入口 / 四视图（本文档）
 │   ├── development.md      # 测试（自动化 + 手工验证清单）与 npm 发布流程
-│   ├── limitations.md      # 已知限制与 TODO（10 条，含不确定处与适配层）
+│   ├── limitations.md      # 已知限制与 TODO（11 条，含不确定处与适配层）
 │   ├── verification-log.md # 本机验证记录（按阶段累积的自验证据表）
 │   ├── verification.md     # 独立验证报告（另一个 agent 产出，含 PASS/FAIL/盲区）
 │   ├── publishing.md       # npm 发布流程：bootstrap / Trusted Publisher / 版本策略 / 排错
@@ -116,6 +121,23 @@ dsh-todo-time-log/
 
 写入策略：**临时文件 + rename 原子替换**（Windows 下 rename 失败时回退为覆盖写），全部写操作串行化在一条 Promise 链上，保证落盘顺序与内存顺序一致。读取时逐条用 `normalizeTodo()` 校验修复；JSON 损坏备份为 `todos.json.corrupt-json-<ts>`、结构异常备份为 `.corrupt-shape-<ts>`、版本不支持备份为 `.corrupt-version-<n>-<ts>`，然后重建空列表。
 
+业务备份（与损坏归档分开）：导入 / 覆盖 / 恢复前，在写锁内把当前数据文件复制为 `<dataFile>.bak-YYYYMMDD-HHmmss-SSS`，供「撤销」与手动恢复使用；该文件与数据文件同目录，不进版本库、不自动清理。
+
+### 2.2.1 导入 / 导出
+
+| 层 | 实现 | 说明 |
+| --- | --- | --- |
+| 格式 | `lib/transfer.js`（纯函数） | JSON 信封（与磁盘同版本 + `exportedAt` / `exporter` 元信息）、CSV（BOM + CRLF + 本地时间）、从 JSON v1–v5 / 裸 `Todo[]` / CSV 解析为规范化记录 |
+| 导出 | `POST /export` → `store.refresh()` → `store.list({filter:'all'})` → `exportTodoData()` | 先合并其他实例刚写入的数据，避免导出陈旧快照；JSON 与 CSV 都走同一函数 |
+| 预览 | `POST /import { dryRun: true }` | 在写锁外先 `refresh()`，按所选策略计算 plan（新增/更新/跳过/移除），不写盘、不改内存 |
+| 导入 | `POST /import` → 写锁内 `mergeIfDiskChanged` → `planImport` → 备份 → 一次性写盘 | `merge`（同 id `updatedAt` 新者胜）/ `add`（已存在即跳过）/ `replace`（整体替换） |
+| 撤销 | `POST /restore { file }` | 只接受同目录 `<dataFile>.bak-*` 基名；恢复前再备份当前状态，因此撤销本身也可回退 |
+| 上限 | 单次 ≤ 5000 条、请求体 ≤ 8 MiB | 超限分别返回 `TOO_MANY_TODOS` / `PAYLOAD_TOO_LARGE` |
+
+导入记录同样逐条经过 `normalizeTodo()`：非法行被跳过并计数（最多回传 20 条明细与行号），合法行才会进入 plan；CSV 的 `耗时(分钟)` 只是导出的派生列，导入时忽略。
+
+导入 / 导出 / 恢复是 **UI 专用**的 HTTP 路由，不注册到 `todo_time_log` 工具（工具与 CRUD 共用 `executeTodoAction` 的约定不变）。
+
 ### 2.3 状态机
 
 ```text
@@ -155,7 +177,7 @@ export async function executeTodoAction(store, action, payload = {}) {
 - **Web UI** 走 `createHttpHandler(store)`（注册在 `webServer` 的 `prefix` 路由 `/api/dsh-todo-time-log`）；
 - **智能体** 走 `createTodoTool(store)`（注册在 `tools`，工具名 `todo_time_log`）。
 
-两条路径都只是包壳：HTTP 把结果映射成 `{ok,value}` / `{ok,error}` 与状态码，工具把结果加上本地时间字段再交给 `output.render()` 生成文本。因此不存在「UI 能做的工具做不到」或两边行为漂移的问题。
+两条路径都只是包壳：HTTP 把结果映射成 `{ok,value}` / `{ok,error}` 与状态码，工具把结果加上本地时间字段再交给 `output.render()` 生成文本。因此不存在「UI 能做的工具做不到」或两边行为漂移的问题（例外：`/export`、`/import`、`/restore` 是 UI 专用的数据传输路由，见 §2.2.1，未注册到工具）。
 
 ### 3.2 Host 入口
 
@@ -207,7 +229,10 @@ export function apply(ctx, config = {}) {
 | 分类非字符串 / 超 40 字符 | 返回 `PROJECT_INVALID` / `PROJECT_TOO_LONG`（HTTP 400） |
 | 旧版本 v1 数据 | 自动迁移为 v2（`project: ''`）并提示，下次写入落盘 |
 | 磁盘写入失败 | 内存变更保留、提示「数据已更新但写入磁盘失败，将在下次写入时重试」，并在 `/health` 的 `lastPersistError` 暴露 |
-| 待办数量超上限（5000） | 返回 `TOO_MANY_TODOS`（HTTP 409） |
+| 待办数量超上限（5000） | 返回 `TOO_MANY_TODOS`（HTTP 409）；导入后超限同样拒绝且不写盘 |
+| 导入文件格式非法 / 版本不支持 / 没有有效行 | 返回 `IMPORT_INVALID` / `IMPORT_VERSION_UNSUPPORTED` / `IMPORT_EMPTY`（HTTP 400），不写盘 |
+| 导入前备份失败 | 返回 `BACKUP_FAILED`（HTTP 500），导入取消，内存与磁盘都保持原状 |
+| 恢复的备份文件名不合法 / 不存在 / 损坏 | 返回 `BACKUP_INVALID`（HTTP 400）；只允许同目录 `<dataFile>.bak-*` 基名，拒绝路径穿越 |
 
 > 修复/异常提示只投递一次：`TodoStore` 用「pending 队列」把载入期修复提示交给下一次 `list()`，诊断历史仍保留在 `describe().loadNotices`，避免每次刷新都刷提示。
 
