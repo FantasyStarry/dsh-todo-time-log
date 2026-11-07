@@ -537,6 +537,60 @@ test('e. 点击「看板」分段后切换到看板视图并出现看板列', as
   });
 });
 
+test('m. 甘特图：四档范围、用时列、分组折叠与「现在」标记', async () => {
+  await withPanel(defaultHandler(), async ({ container, click }) => {
+    const ganttButton = findButton(container, '甘特图');
+    assert.ok(ganttButton, '应存在「甘特图」视图分段按钮');
+    await click(ganttButton);
+
+    const gantt = container.querySelector('.ttl-gantt');
+    assert.ok(gantt, '切换后应渲染 .ttl-gantt 容器');
+    assert.equal(container.querySelectorAll('.ttl-table-row').length, 0, '甘特视图不应残留表格行');
+
+    // 四档范围（今天 / 近 7 天 / 近 30 天 / 全部），默认「全部」。
+    const rangeSelect = container.querySelector('select[aria-label="范围"]');
+    assert.ok(rangeSelect, '甘特工具栏应有范围选择器');
+    assert.deepEqual(
+      [...rangeSelect.querySelectorAll('option')].map((option) => option.value),
+      ['today', '7d', '30d', 'all']
+    );
+    assert.equal(rangeSelect.value, 'all');
+
+    // 轴末尾是「用时」列；有进行中待办时显示「现在」标记。
+    assert.equal(textOf(container.querySelector('.ttl-gantt-head-duration')), '用时');
+    assert.ok(container.querySelector('.ttl-gantt-now-label'), '有进行中待办时应显示「现在」标记');
+    assert.equal(container.querySelectorAll('.ttl-gantt-bar').length, 2, '两条待办各一根条');
+
+    // 已完成的用时读数常显（创建 09:05 → 完成 10:30）。
+    const completedRow = [...container.querySelectorAll('.ttl-gantt-row')].find(
+      (row) => row.getAttribute('data-status') === 'completed'
+    );
+    assert.ok(completedRow, '应有已完成行');
+    assert.equal(textOf(completedRow.querySelector('.ttl-gantt-duration-text')), '1 时 25 分');
+    const pendingRow = [...container.querySelectorAll('.ttl-gantt-row')].find(
+      (row) => row.getAttribute('data-status') === 'pending'
+    );
+    assert.ok(pendingRow, '应有进行中行');
+    assert.ok(pendingRow.querySelector('.ttl-gantt-duration-dot'), '进行中用时带小蓝点');
+    // 行标签不再重复分类徽标，改为行尾展开箭头。
+    assert.equal(completedRow.querySelector('.ttl-project-badge'), null, '行内不再重复分类徽标');
+    assert.equal(completedRow.querySelector('.ttl-gantt-row-label .ttl-gantt-caret').getAttribute('data-expanded'), 'false');
+
+    // 分组头是一个可折叠按钮：显示分类、条数与「进行中 N」聚合。
+    const groupToggle = container.querySelector('.ttl-gantt-group-toggle');
+    assert.ok(groupToggle, '分类分组头应是折叠按钮');
+    assert.equal(groupToggle.getAttribute('aria-expanded'), 'true');
+    assert.ok(textOf(groupToggle).includes('工作'), '组头应显示分类名');
+    assert.ok(textOf(groupToggle).includes('2 条'), '组头应显示条数聚合');
+    assert.ok(textOf(groupToggle).includes('进行中 1'), '组头应显示进行中聚合');
+    await click(groupToggle);
+    assert.equal(groupToggle.getAttribute('aria-expanded'), 'false', '点击组头后应折叠');
+    assert.equal(container.querySelectorAll('.ttl-gantt-row').length, 0, '折叠后组内行应隐藏');
+    await click(groupToggle);
+    assert.equal(container.querySelectorAll('.ttl-gantt-row').length, 2, '再次点击应展开');
+  });
+});
+
 test('h. 数据对话框：打开、文件预览、切换冲突策略、确认导入与撤销', async () => {
   const summary = { mode: 'merge', added: 2, updated: 0, skipped: 1, removed: 0, total: 2, changed: true };
   const handler = (action, body) => {

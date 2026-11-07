@@ -1,8 +1,8 @@
 /** 通用小组件、徽标、甘特图、项目选择器与对话录入面板。 */
-import { GANTT_LABEL_WIDTH, GANTT_TRACK_WIDTH, chooseTickStep, fileBaseName, formatTickLabel, formatTime, groupByProject, isRecord, normalizeFiles, normalizeProject, projectLabel, projectTone, toMillis } from './helpers.js';
+import { chooseTickStep, fileBaseName, formatDurationShort, formatTickLabel, formatTime, groupByProject, isRecord, normalizeFiles, normalizeProject, projectLabel, projectTone, startOfDay, toMillis } from './helpers.js';
 import { t } from './i18n.js';
 import { React, h } from './runtime.js';
-import { GANTT_RANGES, PROJECT_CUSTOM } from './styles.js';
+import { PROJECT_CUSTOM } from './styles.js';
 
 
 
@@ -216,52 +216,57 @@ export function CheckButton(props) {
 /**
  * 甘特图视图：纯展示，数据由父级 /list（filter=all、sortBy=createdAt、
  * direction=asc、带 project 筛选）提供。非法/缺失时间一律跳过或按 now 兜底。
+ * 时间轴宽度由 flex 自适应，条形与刻度全部用百分比定位，不依赖测量。
  */
 export function GanttView(props) {
   const todos = props && Array.isArray(props.todos) ? props.todos : [];
   const range = props && typeof props.range === 'string' ? props.range : 'all';
-  const nowMs = Date.now();
-  let rangeDays = 0;
-  for (const option of GANTT_RANGES) {
-    if (option.value === range) rangeDays = option.days;
-  }
-  const windowStart = rangeDays > 0 ? nowMs - rangeDays * 86400e3 : null;
+  const nowMs = props && Number.isFinite(props.nowMs) ? props.nowMs : Date.now();
+  const windowDays = range === 'today' ? 1 : range === '7d' ? 7 : range === '30d' ? 30 : 0;
+  const domainStart = windowDays > 0 ? startOfDay(nowMs - (windowDays - 1) * 86400e3) : null;
+  const domainEnd = windowDays > 0 ? nowMs : null;
 
   const entries = [];
   for (const todo of todos) {
     if (todo === null || todo === undefined) continue;
-    const start = toMillis(todo.createdAt);
-    if (start === null) continue; // 创建时间不可解析：无法定位，跳过该条
+    const startRaw = toMillis(todo.createdAt);
+    if (startRaw === null) continue; // 创建时间不可解析：无法定位，跳过该条
     const completed = todo.status === 'completed';
-    let end = completed ? toMillis(todo.completedAt) : nowMs;
-    if (end === null || end < start) end = nowMs > start ? nowMs : start; // 非法完成时间按 now 兜底
-    if (windowStart !== null && (end < windowStart || start > nowMs)) continue;
-    entries.push({ todo, start, end, ongoing: !completed });
+    let endRaw = completed ? toMillis(todo.completedAt) : nowMs;
+    if (endRaw === null || endRaw < startRaw) endRaw = nowMs > startRaw ? nowMs : startRaw; // 非法完成时间按 now 兜底
+    if (windowDays > 0 && (endRaw < domainStart || startRaw > domainEnd)) continue;
+    entries.push({
+      todo,
+      startRaw,
+      endRaw,
+      // 绘制范围裁剪到窗口内，避免出现负 left 或超过 100% 的条。
+      start: windowDays > 0 ? Math.max(startRaw, domainStart) : startRaw,
+      end: windowDays > 0 ? Math.min(endRaw, domainEnd) : endRaw,
+      ongoing: !completed,
+    });
   }
 
-  if (entries.length === 0) {
-    return h(TextPlaceholder, {
+  const emptyPlaceholder = () =>
+    h(TextPlaceholder, {
       titleKey: 'gantt.empty',
       hintKey: 'gantt.emptyHint',
       actionKey: props && typeof props.emptyActionKey === 'string' ? props.emptyActionKey : 'list.emptyAction',
       onAction: props && typeof props.onEmptyAction === 'function' ? props.onEmptyAction : null,
     });
-  }
 
-  let min = Infinity;
-  let max = -Infinity;
-  for (const entry of entries) {
-    if (entry.start < min) min = entry.start;
-    if (entry.end > max) max = entry.end;
+  if (entries.length === 0) return emptyPlaceholder();
+
+  let min = domainStart;
+  let max = domainEnd;
+  if (windowDays === 0) {
+    min = Infinity;
+    max = -Infinity;
+    for (const entry of entries) {
+      if (entry.start < min) min = entry.start;
+      if (entry.end > max) max = entry.end;
+    }
   }
-  if (!Number.isFinite(min) || !Number.isFinite(max)) {
-    return h(TextPlaceholder, {
-      titleKey: 'gantt.empty',
-      hintKey: 'gantt.emptyHint',
-      actionKey: props && typeof props.emptyActionKey === 'string' ? props.emptyActionKey : 'list.emptyAction',
-      onAction: props && typeof props.onEmptyAction === 'function' ? props.onEmptyAction : null,
-    });
-  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return emptyPlaceholder();
 
   let span = max - min;
   if (span <= 0) {
@@ -269,24 +274,37 @@ export function GanttView(props) {
     max += 1800000;
     span = max - min;
   }
-  const padding = span * 0.05;
-  min -= padding;
-  max += padding;
-  span = max - min;
 
-  const toX = (ms) => ((ms - min) / span) * GANTT_TRACK_WIDTH;
-  const nowInDomain = nowMs >= min && nowMs <= max;
-  const nowX = nowInDomain ? toX(nowMs) : 0;
+  const toPct = (ms) => {
+    const pct = ((ms - min) / span) * 100;
+    if (pct < 0) return 0;
+    if (pct > 100) return 100;
+    return pct;
+  };
+
+  const nowPct = nowMs >= min && nowMs <= max ? toPct(nowMs) : null;
   const step = chooseTickStep(span);
   const ticks = [];
-  let tick = Math.ceil(min / step) * step;
+  let tick;
+  if (step >= 86400e3) {
+    // 整天步长从本地 00:00 起算，避免 UTC epoch 对齐把刻度落到早上 08:00。
+    tick = startOfDay(min);
+    if (tick < min) tick += 86400e3;
+  } else {
+    // 小时 / 分钟步长对齐本地整点：local = utc - getTimezoneOffset()。
+    const offsetMs = -new Date(min).getTimezoneOffset() * 60000;
+    tick = Math.ceil((min + offsetMs) / step) * step - offsetMs;
+  }
   let guard = 0;
   while (tick <= max && guard < 200) {
-    ticks.push(tick);
+    ticks.push({ ms: tick, pct: toPct(tick) });
     tick += step;
     guard += 1;
   }
+  const tickClass = (pct) => (pct < 3 ? 'ttl-gantt-tick-label ttl-gantt-tick-label-start' : 'ttl-gantt-tick-label');
+  const tickText = (tickEntry) => (tickEntry.pct <= 90 ? formatTickLabel(tickEntry.ms, span, step) : '');
 
+  const durationText = (entry) => formatDurationShort(entry.startRaw, entry.ongoing ? nowMs : entry.endRaw);
   const barAria = (entry) => {
     const todo = entry.todo;
     const endLabel = entry.ongoing
@@ -297,173 +315,297 @@ export function GanttView(props) {
       title: todo.title === '' ? t('list.empty') : todo.title,
       start: formatTime(todo.createdAt),
       end: endLabel,
+      duration: entry.ongoing
+        ? t('table.elapsed', { duration: durationText(entry) })
+        : t('table.spent', { duration: durationText(entry) }),
     });
   };
 
-  const bodyWidth = GANTT_LABEL_WIDTH + GANTT_TRACK_WIDTH;
+  const collapsedMap = props && props.collapsedProjects ? props.collapsedProjects : null;
+  const isCollapsed = (project) => Boolean(collapsedMap && collapsedMap[project] === true);
+  const toggleGroup = (project) => {
+    if (props && typeof props.onToggleGroup === 'function') props.onToggleGroup(project);
+  };
   const groups = groupByProject(entries, (entry) => entry.todo.project);
+
   const ganttDetailIdOf = (todo) => `ttl-gantt-detail-${String(todo.id).replace(/[^A-Za-z0-9_-]/g, '-')}`;
+  const ganttGroupIdOf = (project) => `ttl-gantt-group-${String(project).replace(/[^A-Za-z0-9_-]/g, '-') || 'none'}`;
   const isExpanded = (todo) => Boolean(props && props.expandedIds && props.expandedIds[todo.id] === true);
   const toggleRow = (todo) => {
     if (todo === null || todo === undefined) return;
     if (props && typeof props.onToggleExpanded === 'function') props.onToggleExpanded(todo);
   };
 
+  const scrollRef = React.useRef(null);
+  React.useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    // 只有真的溢出（极窄容器）时才需要把「现在」滚进视野；自适应布局下这里是 no-op。
+    if (node.scrollWidth > node.clientWidth) node.scrollLeft = node.scrollWidth;
+  }, [range]);
+
+  let totalOngoing = 0;
+  let totalSpentMs = 0;
+  for (const entry of entries) {
+    if (entry.ongoing) totalOngoing += 1;
+    else totalSpentMs += entry.endRaw - entry.startRaw;
+  }
+
+  const head = h(
+    'div',
+    { className: 'ttl-gantt-head' },
+    h('div', { className: 'ttl-gantt-head-label' }, t('gantt.axis')),
+    h(
+      'div',
+      { className: 'ttl-gantt-head-track' },
+      ticks.map((tickEntry) =>
+        h(
+          'span',
+          {
+            key: `head-${tickEntry.ms}`,
+            className: tickClass(tickEntry.pct),
+            style: { left: `${tickEntry.pct}%` },
+            'aria-hidden': 'true',
+          },
+          tickText(tickEntry)
+        )
+      ),
+      nowPct === null ? null : h('span', { className: 'ttl-gantt-now-label' }, t('gantt.now'))
+    ),
+    h('div', { className: 'ttl-gantt-head-duration' }, t('gantt.durationHeader'))
+  );
+
+  const footer = h(
+    'div',
+    { className: 'ttl-gantt-footer' },
+    h(
+      'span',
+      { className: 'ttl-gantt-legend' },
+      h('span', { className: 'ttl-gantt-legend-swatch', 'data-kind': 'completed', 'aria-hidden': 'true' }),
+      t('gantt.legendCompleted')
+    ),
+    h(
+      'span',
+      { className: 'ttl-gantt-legend' },
+      h('span', { className: 'ttl-gantt-legend-swatch', 'data-kind': 'ongoing', 'aria-hidden': 'true' }),
+      t('gantt.legendOngoing')
+    ),
+    nowPct === null
+      ? null
+      : h(
+          'span',
+          { className: 'ttl-gantt-legend' },
+          h('span', { className: 'ttl-gantt-legend-swatch', 'data-kind': 'now', 'aria-hidden': 'true' }),
+          t('gantt.legendNow')
+        ),
+    h(
+      'span',
+      { className: 'ttl-gantt-footer-summary' },
+      t('gantt.footerTotal', { count: entries.length }),
+      totalOngoing > 0 ? ` · ${t('gantt.footerOngoing', { count: totalOngoing })}` : '',
+      totalSpentMs > 0 ? ` · ${t('gantt.completedDuration', { duration: formatDurationShort(0, totalSpentMs) })}` : ''
+    )
+  );
+
   return h(
     'div',
     { className: 'ttl-gantt' },
     h(
       'div',
-      { className: 'ttl-gantt-scroll', role: 'region', 'aria-label': t('gantt.aria'), tabIndex: 0 },
+      {
+        ref: scrollRef,
+        className: 'ttl-gantt-scroll',
+        role: 'region',
+        'aria-label': t('gantt.aria'),
+        tabIndex: 0,
+      },
       h(
         'div',
-        { className: 'ttl-gantt-body', style: { width: `${bodyWidth}px` } },
-        nowInDomain
-          ? h('div', {
-              className: 'ttl-gantt-now-line',
-              style: { left: `${GANTT_LABEL_WIDTH + nowX}px` },
-              'aria-hidden': 'true',
-            })
-          : null,
-        h(
-          'div',
-          { className: 'ttl-gantt-head' },
-          h('div', { className: 'ttl-gantt-head-label' }, t('gantt.axis')),
-          h(
-            'div',
-            { className: 'ttl-gantt-head-track', style: { width: `${GANTT_TRACK_WIDTH}px` } },
-            ticks.map((ms) =>
-              h(
-                'span',
-                {
-                  key: `head-${ms}`,
-                  className: 'ttl-gantt-tick-label',
-                  style: { left: `${toX(ms)}px` },
-                },
-                formatTickLabel(ms, span)
-              )
+        { className: 'ttl-gantt-body' },
+        nowPct === null
+          ? null
+          : h(
+              'div',
+              { className: 'ttl-gantt-now-layer', 'aria-hidden': 'true' },
+              h('div', { className: 'ttl-gantt-now-line', style: { left: `calc(${nowPct}% - 2px)` } })
             ),
-            nowInDomain
-              ? h('span', { className: 'ttl-gantt-now-label', style: { left: `${nowX}px` } }, t('gantt.now'))
-              : null
-          )
-        ),
-        groups.map((group) =>
-          h(
+        head,
+        groups.map((group) => {
+          const collapsed = isCollapsed(group.project);
+          const groupId = ganttGroupIdOf(group.project);
+          let ongoingCount = 0;
+          let spentMs = 0;
+          for (const entry of group.items) {
+            if (entry.ongoing) ongoingCount += 1;
+            else spentMs += entry.endRaw - entry.startRaw;
+          }
+          return h(
             'div',
             { key: `gantt-group-${group.project}`, className: 'ttl-gantt-group' },
             h(
               'div',
               { className: 'ttl-gantt-group-head' },
               h(
-                'div',
-                { className: 'ttl-gantt-head-label ttl-gantt-group-label' },
-                t('group.header', { project: projectLabel(group.project), count: group.items.length })
-              ),
-              h('div', { className: 'ttl-gantt-group-track', style: { width: `${GANTT_TRACK_WIDTH}px` } })
-            ),
-            group.items.map((entry) => {
-              const aria = barAria(entry);
-              const todo = entry.todo;
-              const expanded = isExpanded(todo);
-              const editing = Boolean(props && props.editingId === todo.id);
-              const detailId = ganttDetailIdOf(todo);
-              const row = h(
-                'div',
+                'button',
                 {
-                  key: todo.id,
-                  className: expanded ? 'ttl-gantt-row ttl-gantt-row-expanded' : 'ttl-gantt-row',
-                  'data-status': todo.status,
-                  onClick: () => toggleRow(todo),
+                  type: 'button',
+                  className: 'ttl-gantt-group-toggle',
+                  'aria-expanded': collapsed ? 'false' : 'true',
+                  'aria-controls': groupId,
+                  onClick: () => toggleGroup(group.project),
                 },
                 h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'ttl-gantt-row-label',
-                    'aria-expanded': expanded ? 'true' : 'false',
-                    'aria-controls': detailId,
-                    'aria-label': t('detail.toggleAria', {
-                      action: expanded ? t('detail.collapse') : t('detail.expand'),
-                      title: todo.title,
-                    }),
-                    title: expanded ? t('detail.collapse') : t('detail.expand'),
-                    onClick: (event) => {
-                      if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-                      toggleRow(todo);
-                    },
-                  },
-                  h('span', { className: 'ttl-gantt-dot', 'data-status': todo.status, 'aria-hidden': 'true' }),
-                  h(
-                    'span',
-                    { className: 'ttl-gantt-title', title: todo.title },
-                    todo.title === '' ? t('list.empty') : todo.title
-                  ),
-                  h(ProjectBadge, { project: todo.project })
+                  'span',
+                  { className: 'ttl-gantt-group-name' },
+                  h('span', {
+                    className: 'ttl-gantt-caret',
+                    'data-expanded': collapsed ? 'false' : 'true',
+                    'aria-hidden': 'true',
+                  }),
+                  h('span', { className: 'ttl-gantt-group-project' }, projectLabel(group.project)),
+                  h('span', { className: 'ttl-gantt-group-count' }, t('gantt.groupCount', { count: group.items.length }))
                 ),
                 h(
-                  'div',
-                  { className: 'ttl-gantt-track', style: { width: `${GANTT_TRACK_WIDTH}px` } },
-                  ticks.map((ms) =>
-                    h('span', {
-                      key: `grid-${ms}`,
-                      className: 'ttl-gantt-grid',
-                      style: { left: `${toX(ms)}px` },
-                      'aria-hidden': 'true',
-                    })
-                  ),
-                  h(
-                    'div',
-                    {
-                      className: entry.ongoing
-                        ? 'ttl-gantt-bar ttl-gantt-bar-ongoing'
-                        : 'ttl-gantt-bar ttl-gantt-bar-completed',
-                      style: {
-                        left: `${((entry.start - min) / span) * 100}%`,
-                        width: `${Math.max(((entry.end - entry.start) / span) * 100, 0.4)}%`,
+                  'span',
+                  { className: 'ttl-gantt-group-summary' },
+                  ongoingCount > 0 ? h('span', null, t('gantt.groupOngoing', { count: ongoingCount })) : null,
+                  ongoingCount > 0 && spentMs > 0
+                    ? h('span', { className: 'ttl-gantt-group-sep', 'aria-hidden': 'true' }, '·')
+                    : null,
+                  spentMs > 0
+                    ? h('span', null, t('gantt.completedDuration', { duration: formatDurationShort(0, spentMs) }))
+                    : null
+                ),
+                h('span', { className: 'ttl-gantt-duration-cell ttl-gantt-group-duration', 'aria-hidden': 'true' })
+              )
+            ),
+            h(
+              'div',
+              { id: groupId, className: 'ttl-gantt-group-body' },
+              collapsed
+                ? null
+                : group.items.map((entry) => {
+                    const aria = barAria(entry);
+                    const todo = entry.todo;
+                    const expanded = isExpanded(todo);
+                    const editing = Boolean(props && props.editingId === todo.id);
+                    const detailId = ganttDetailIdOf(todo);
+                    const leftPct = toPct(entry.start);
+                    const rightPct = toPct(entry.end);
+                    const row = h(
+                      'div',
+                      {
+                        key: todo.id,
+                        className: expanded ? 'ttl-gantt-row ttl-gantt-row-expanded' : 'ttl-gantt-row',
+                        'data-status': todo.status,
+                        onClick: () => toggleRow(todo),
                       },
-                      role: 'img',
-                      'aria-label': aria,
-                      title: aria,
-                    },
-                    entry.ongoing
-                      ? h('span', { className: 'ttl-gantt-bar-flag' }, t('gantt.ongoing'))
-                      : null
-                  )
-                )
-              );
-              if (!expanded) return row;
-              const detail = h(
-                'div',
-                {
-                  key: `${todo.id}-detail`,
-                  id: detailId,
-                  className: 'ttl-gantt-row-detail',
-                  role: 'region',
-                  'aria-label': t('detail.aria'),
-                },
-                h(
-                  'div',
-                  { className: 'ttl-gantt-row-detail-inner' },
-                  props && typeof props.renderDetailContent === 'function'
-                    ? props.renderDetailContent(todo)
-                    : null,
-                  editing && props && typeof props.renderEditFields === 'function'
-                    ? props.renderEditFields(todo)
-                    : null,
-                  h(
-                    'div',
-                    { className: 'ttl-gantt-row-detail-actions' },
-                    props && typeof props.renderActions === 'function' ? props.renderActions(todo) : null
-                  )
-                )
-              );
-              return [row, detail];
-            })
-          )
-        )
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'ttl-gantt-row-label',
+                          'aria-expanded': expanded ? 'true' : 'false',
+                          'aria-controls': detailId,
+                          'aria-label': t('detail.toggleAria', {
+                            action: expanded ? t('detail.collapse') : t('detail.expand'),
+                            title: todo.title,
+                          }),
+                          title: expanded ? t('detail.collapse') : t('detail.expand'),
+                          onClick: (event) => {
+                            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+                            toggleRow(todo);
+                          },
+                        },
+                        h('span', { className: 'ttl-gantt-dot', 'data-status': todo.status, 'aria-hidden': 'true' }),
+                        h(
+                          'span',
+                          { className: 'ttl-gantt-title', title: todo.title },
+                          todo.title === '' ? t('list.empty') : todo.title
+                        ),
+                        h('span', {
+                          className: 'ttl-gantt-caret',
+                          'data-expanded': expanded ? 'true' : 'false',
+                          'aria-hidden': 'true',
+                        })
+                      ),
+                      h(
+                        'div',
+                        { className: 'ttl-gantt-track' },
+                        ticks.map((tickEntry) =>
+                          h('span', {
+                            key: `grid-${tickEntry.ms}`,
+                            className: 'ttl-gantt-grid',
+                            style: { left: `${tickEntry.pct}%` },
+                            'aria-hidden': 'true',
+                          })
+                        ),
+                        h('div', {
+                          className: entry.ongoing
+                            ? 'ttl-gantt-bar ttl-gantt-bar-ongoing'
+                            : 'ttl-gantt-bar ttl-gantt-bar-completed',
+                          style: { left: `${leftPct}%`, width: `${Math.max(rightPct - leftPct, 0)}%` },
+                          role: 'img',
+                          'aria-label': aria,
+                          title: aria,
+                        })
+                      ),
+                      h(
+                        'div',
+                        {
+                          className: 'ttl-gantt-duration-cell',
+                          title: entry.ongoing
+                            ? t('gantt.elapsedTitle', { duration: durationText(entry) })
+                            : t('table.spent', { duration: durationText(entry) }),
+                        },
+                        entry.ongoing
+                          ? h('span', { className: 'ttl-gantt-duration-dot', 'aria-hidden': 'true' })
+                          : null,
+                        h(
+                          'span',
+                          {
+                            className: entry.ongoing
+                              ? 'ttl-gantt-duration-text ttl-gantt-duration-ongoing'
+                              : 'ttl-gantt-duration-text',
+                          },
+                          durationText(entry)
+                        )
+                      )
+                    );
+                    if (!expanded) return row;
+                    const detail = h(
+                      'div',
+                      {
+                        key: `${todo.id}-detail`,
+                        id: detailId,
+                        className: 'ttl-gantt-row-detail',
+                        role: 'region',
+                        'aria-label': t('detail.aria'),
+                      },
+                      h(
+                        'div',
+                        { className: 'ttl-gantt-row-detail-inner' },
+                        props && typeof props.renderDetailContent === 'function'
+                          ? props.renderDetailContent(todo)
+                          : null,
+                        editing && props && typeof props.renderEditFields === 'function'
+                          ? props.renderEditFields(todo)
+                          : null,
+                        h(
+                          'div',
+                          { className: 'ttl-gantt-row-detail-actions' },
+                          props && typeof props.renderActions === 'function' ? props.renderActions(todo) : null
+                        )
+                      )
+                    );
+                    return [row, detail];
+                  })
+            )
+          );
+        })
       )
-    )
+    ),
+    footer
   );
 }
 

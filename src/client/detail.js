@@ -8,6 +8,14 @@ export function createDetailContent(deps) {
 
   const renderDetailContent = (todo) => {
     const completed = todo.status === 'completed';
+    // 进行中的待办给出「已进行 X」，让详情与看板/表格的用时口径一致。
+    let durationText = EMPTY_TIME;
+    if (completed) {
+      durationText = formatDuration(todo.createdAt, todo.completedAt);
+    } else {
+      const elapsed = formatDuration(todo.createdAt, Date.now());
+      if (elapsed !== EMPTY_TIME) durationText = t('table.elapsed', { duration: elapsed });
+    }
     return h(
       'dl',
       { className: 'ttl-detail-list' },
@@ -42,11 +50,7 @@ export function createDetailContent(deps) {
       h('dt', { className: 'ttl-detail-label' }, t('detail.updated')),
       h('dd', { className: 'ttl-detail-value' }, formatTime(todo.updatedAt)),
       h('dt', { className: 'ttl-detail-label' }, t('detail.duration')),
-      h(
-        'dd',
-        { className: 'ttl-detail-value' },
-        completed ? formatDuration(todo.createdAt, todo.completedAt) : EMPTY_TIME
-      ),
+      h('dd', { className: 'ttl-detail-value' }, durationText),
       h('dt', { className: 'ttl-detail-label' }, t('detail.id')),
       h('dd', { className: 'ttl-detail-value' }, h('span', { className: 'ttl-detail-id' }, todo.id))
     );

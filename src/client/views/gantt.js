@@ -3,15 +3,18 @@ import { h } from '../runtime.js';
 import { GanttView } from '../widgets.js';
 
 export function renderGanttView(deps) {
-  const { busyId, editingId, editingPriority, editingType, emptyActionKey, ganttExpandedIds, handleEmptyAction, prioritySelectControl, projectInput, range, renderActionButtons, renderDetailContent, setEditingPriority, setEditingType, titleInput, toggleGanttExpanded, typeSelectControl, visibleTodos } = deps;
+  const { busyId, editingId, editingPriority, editingType, emptyActionKey, ganttCollapsedProjects, ganttExpandedIds, handleEmptyAction, nowMs, prioritySelectControl, projectInput, range, renderActionButtons, renderDetailContent, setEditingPriority, setEditingType, titleInput, toggleGanttExpanded, toggleGanttGroup, typeSelectControl, visibleTodos } = deps;
 
   return h(GanttView, {
     todos: visibleTodos,
     range,
+    nowMs,
     emptyActionKey,
     onEmptyAction: handleEmptyAction,
     expandedIds: ganttExpandedIds,
     onToggleExpanded: toggleGanttExpanded,
+    collapsedProjects: ganttCollapsedProjects,
+    onToggleGroup: toggleGanttGroup,
     editingId,
     renderDetailContent,
     renderEditFields: (todo) =>

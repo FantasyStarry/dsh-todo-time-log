@@ -678,26 +678,44 @@ export function boardColumns(todos, groupBy) {
   ];
 }
 
-export const GANTT_LABEL_WIDTH = 220;
-export const GANTT_TRACK_WIDTH = 900;
 export const GANTT_STEPS = [
   60e3, 2 * 60e3, 5 * 60e3, 10 * 60e3, 15 * 60e3, 30 * 60e3,
   3600e3, 2 * 3600e3, 3 * 3600e3, 6 * 3600e3, 12 * 3600e3,
   86400e3, 2 * 86400e3, 3 * 86400e3, 7 * 86400e3, 14 * 86400e3, 30 * 86400e3, 90 * 86400e3, 180 * 86400e3, 365 * 86400e3,
 ];
 
-/** 目标 6-10 个刻度：取让刻度数不超过 10 的最小步长。 */
-export function chooseTickStep(span) {
-  for (const step of GANTT_STEPS) {
-    if (span / step <= 10) return step;
-  }
-  return GANTT_STEPS[GANTT_STEPS.length - 1];
+/** 当天 00:00（本地时区）的毫秒时间戳；甘特范围按自然日对齐。 */
+export function startOfDay(ms) {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 }
 
-/** 刻度标签：MM-DD HH:mm；跨度超过 30 天用 MM-DD。 */
-export function formatTickLabel(ms, span) {
+/** 目标 6-10 个刻度：跨度 ≥1.5 天时只在「整天」步长里选，避免同一天出现多个相同标签。 */
+export function chooseTickStep(span) {
+  if (span >= 1.5 * 86400e3) {
+    for (const step of GANTT_STEPS) {
+      if (step >= 86400e3 && span / step <= 10) return step;
+    }
+    return GANTT_STEPS[GANTT_STEPS.length - 1];
+  }
+  for (const step of GANTT_STEPS) {
+    if (step < 86400e3 && span / step <= 10) return step;
+  }
+  return 12 * 3600e3;
+}
+
+/**
+ * 刻度标签：跨度不超过 1 天用 HH:mm；整天步长用 MM-DD（超 300 天带年份）；
+ * 天级跨度但小于一天的步长（如 1.2 天用 6 小时）带日期与时刻，避免同一天重复。
+ */
+export function formatTickLabel(ms, span, step) {
   const date = new Date(ms);
   const monthDay = `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-  if (span > 30 * 86400e3) return monthDay;
-  return `${monthDay} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  if (span <= 86400e3) return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  if (step !== undefined && step < 86400e3) {
+    return `${monthDay} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  }
+  if (span > 300 * 86400e3) return `${date.getFullYear()}-${monthDay}`;
+  return monthDay;
 }

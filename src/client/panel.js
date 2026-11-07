@@ -77,6 +77,8 @@ function TodoPanel() {
   const [calendarSelectedDay, setCalendarSelectedDay] = React.useState(null);
   // 甘特图行内详情展开状态（与表格的 expandedIds 相互独立）。
   const [ganttExpandedIds, setGanttExpandedIds] = React.useState({});
+  // 甘特图分类分组的折叠状态：key 用 project（'' 表示未分类），跨视图切换保留。
+  const [ganttCollapsedProjects, setGanttCollapsedProjects] = React.useState({});
   // 四期：对话输入的 @ 文件补全状态（quick-add 由 Host 解析，本地不再解析文本）。
   const [fileSuggestions, setFileSuggestions] = React.useState([]);
   const [suggestOpen, setSuggestOpen] = React.useState(false);
@@ -247,9 +249,9 @@ function TodoPanel() {
     void loadList(query.filter, query.sortBy, query.direction, projectFilter);
   }, [view, filter, sortBy, direction, projectFilter, loadList]);
 
-  // 看板里「已进行 X」随时间推进：只在本视图下每 60 秒更新一次「现在」。
+  // 看板/甘特里「已进行 X」随时间推进：只在这两个视图下每 60 秒更新一次「现在」。
   React.useEffect(() => {
-    if (view !== 'board') return undefined;
+    if (view !== 'board' && view !== 'gantt') return undefined;
     setNowMs(Date.now());
     const timer = setInterval(() => {
       setNowMs(Date.now());
@@ -985,6 +987,16 @@ function TodoPanel() {
     });
   };
 
+  const toggleGanttGroup = (project) => {
+    const key = typeof project === 'string' ? project : '';
+    setGanttCollapsedProjects((current) => {
+      const next = Object.assign({}, current);
+      if (next[key]) delete next[key];
+      else next[key] = true;
+      return next;
+    });
+  };
+
   // —— 表格 / 看板 / 日历共用的行内操作与编辑控件 ——
   const detailIdOf = (todo) => `ttl-detail-${String(todo.id).replace(/[^A-Za-z0-9_-]/g, '-')}`;
 
@@ -1614,6 +1626,7 @@ function TodoPanel() {
     emptyColumnKey,
     expandedIds,
     filter,
+    ganttCollapsedProjects,
     ganttExpandedIds,
     handleColumnAdd,
     handleDelete,
@@ -1652,6 +1665,7 @@ function TodoPanel() {
     titleInput,
     toggleExpanded,
     toggleGanttExpanded,
+    toggleGanttGroup,
     typeBadge,
     typeSelectControl,
     visibleTodos,

@@ -90,9 +90,10 @@ export function queryForView(view, filter, sortBy, direction) {
 }
 
 export const GANTT_RANGES = [
-  { value: 'all', labelKey: 'gantt.rangeAll', days: 0 },
+  { value: 'today', labelKey: 'gantt.rangeToday', days: 1 },
   { value: '7d', labelKey: 'gantt.range7d', days: 7 },
   { value: '30d', labelKey: 'gantt.range30d', days: 30 },
+  { value: 'all', labelKey: 'gantt.rangeAll', days: 0 },
 ];
 /** 分类筛选里代表「全部」的哨兵值；'' 保留给「未分类」。 */
 export const PROJECT_FILTER_ALL = '__ttl_all_projects__';
@@ -926,47 +927,79 @@ export const CSS_TEXT = `.ttl-root {
   overflow-wrap: anywhere;
 }
 .ttl-gantt {
+  --ttl-gantt-label-width: 200px;
+  --ttl-gantt-duration-width: 84px;
+  position: relative;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: 12px;
   overflow: hidden;
+  background: var(--dsw-alias-bg-base);
 }
 .ttl-gantt-scroll { overflow-x: auto; overflow-y: hidden; }
 .ttl-gantt-scroll:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
 }
-.ttl-gantt-body { position: relative; }
+.ttl-gantt-body {
+  position: relative;
+  min-width: calc(var(--ttl-gantt-label-width) + var(--ttl-gantt-duration-width) + 240px);
+}
+/* 「现在」竖线：覆盖层左右避开标签列与用时列，线本身按轨道百分比定位。 */
+.ttl-gantt-now-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--ttl-gantt-label-width);
+  right: var(--ttl-gantt-duration-width);
+  z-index: 2;
+  pointer-events: none;
+}
 .ttl-gantt-now-line {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
   background: var(--dsw-alias-state-error-primary);
-  pointer-events: none;
-  z-index: 1;
 }
 .ttl-gantt-head {
   display: flex;
   align-items: stretch;
   height: 30px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
 }
-.ttl-gantt-head-label {
+.ttl-gantt-head-label,
+.ttl-gantt-head-duration {
   position: sticky;
-  left: 0;
-  z-index: 3;
   flex: none;
-  width: 220px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  padding: 0 8px;
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   line-height: 1;
 }
-.ttl-gantt-head-track { position: relative; flex: none; }
+.ttl-gantt-head-label {
+  left: 0;
+  z-index: 4;
+  width: var(--ttl-gantt-label-width);
+  padding: 0 10px;
+}
+.ttl-gantt-head-duration {
+  right: 0;
+  z-index: 4;
+  justify-content: flex-end;
+  width: var(--ttl-gantt-duration-width);
+  padding: 0 10px;
+  border-left: 0.5px solid var(--dsw-alias-border-l1);
+}
+.ttl-gantt-head-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
 .ttl-gantt-tick-label {
   position: absolute;
   top: 50%;
@@ -975,34 +1008,108 @@ export const CSS_TEXT = `.ttl-root {
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+  pointer-events: none;
 }
+/* 首个刻度贴住轨道左缘：改为左对齐，避免被固定标签列盖住半截。 */
+.ttl-gantt-tick-label-start { transform: translate(0, -50%); }
 .ttl-gantt-now-label {
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -50%);
-  padding: 0 2px;
+  right: 2px;
+  transform: translateY(-50%);
+  padding: 0 4px;
+  border-radius: 3px;
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-state-error-primary);
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
+  z-index: 5;
 }
 .ttl-gantt-group-head {
   display: flex;
-  align-items: center;
-  height: 28px;
+  align-items: stretch;
+  height: 30px;
   background: var(--dsw-alias-bg-module-platform);
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
 }
-.ttl-gantt-group-label {
-  background: var(--dsw-alias-bg-module-platform);
-  color: var(--dsw-alias-label-secondary);
-  font-weight: 500;
+.ttl-gantt-group-toggle {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.ttl-gantt-group-track { flex: none; }
-.ttl-gantt-row {
+.ttl-gantt-group-toggle:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.ttl-gantt-group-toggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+.ttl-gantt-group-name {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: none;
+  width: var(--ttl-gantt-label-width);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+}
+.ttl-gantt-group-toggle:hover .ttl-gantt-group-name { background: var(--dsw-alias-interactive-bg-hover); }
+.ttl-gantt-group-project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ttl-gantt-group-count {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-weight: 400;
+}
+.ttl-gantt-group-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 0 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ttl-gantt-group-sep { color: var(--dsw-alias-label-tertiary); }
+.ttl-gantt-group-duration {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  flex: none;
+  width: var(--ttl-gantt-duration-width);
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-module-platform);
+  border-left: 0.5px solid var(--dsw-alias-border-l1);
+}
+.ttl-gantt-group-toggle:hover .ttl-gantt-group-duration { background: var(--dsw-alias-interactive-bg-hover); }
+.ttl-gantt-row {
+  display: flex;
+  align-items: stretch;
   height: 30px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
   cursor: pointer;
@@ -1011,13 +1118,14 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-gantt-row-label {
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 3;
   flex: none;
-  width: 220px;
+  width: var(--ttl-gantt-label-width);
   box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
+  height: 100%;
   padding: 0 8px;
   border: 0;
   background: var(--dsw-alias-bg-base);
@@ -1027,13 +1135,115 @@ export const CSS_TEXT = `.ttl-root {
   cursor: pointer;
   overflow: hidden;
 }
-.ttl-gantt-row-label:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.ttl-gantt-row:hover .ttl-gantt-row-label { background: var(--dsw-alias-interactive-bg-hover); }
 .ttl-gantt-row-label:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
 }
+.ttl-gantt-caret {
+  position: relative;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.ttl-gantt-caret::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  width: 4px;
+  height: 4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--ttl-dur-fast) var(--ttl-ease-out);
+}
+.ttl-gantt-caret[data-expanded='true']::before { transform: rotate(45deg); }
+.ttl-gantt-row-label .ttl-gantt-caret { margin-left: auto; opacity: 0.75; }
+.ttl-gantt-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+.ttl-gantt-dot[data-status='completed'] { background: var(--dsw-alias-state-success-primary); }
+.ttl-gantt-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ttl-gantt-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+.ttl-gantt-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--dsw-alias-border-l1);
+}
+/* 条形按百分比定位；min-width 保证极短任务仍可点/可看，溢出部分被用时列盖住。 */
+.ttl-gantt-bar {
+  position: absolute;
+  top: 7px;
+  height: 16px;
+  min-width: 4px;
+  border-radius: 8px;
+  /* 时间条从左向右「画」出来，呼应创建 → 完成的时间方向。 */
+  animation: ttl-bar-draw 420ms var(--ttl-ease-out) both;
+}
+.ttl-gantt-bar-completed { background: var(--dsw-alias-state-success-secondary); }
+.ttl-gantt-bar-ongoing {
+  background: var(--dsw-alias-state-business-primary);
+  border-right: 2px dashed var(--dsw-alias-label-primary-foreground);
+  box-sizing: border-box;
+}
+.ttl-gantt-duration-cell {
+  position: sticky;
+  right: 0;
+  z-index: 4;
+  flex: none;
+  width: var(--ttl-gantt-duration-width);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 10px;
+  border-left: 0.5px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ttl-gantt-row:hover .ttl-gantt-duration-cell { background: var(--dsw-alias-interactive-bg-hover); }
+.ttl-gantt-duration-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ttl-gantt-duration-ongoing { color: var(--dsw-alias-state-business-primary); }
+.ttl-gantt-duration-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+}
 .ttl-gantt-row-detail {
-  padding: 8px 10px 8px 230px;
+  padding: 8px 10px 8px calc(var(--ttl-gantt-label-width) + 10px);
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-bg-module-platform);
 }
@@ -1053,58 +1263,43 @@ export const CSS_TEXT = `.ttl-root {
   gap: 2px;
   margin-top: 4px;
 }
-.ttl-gantt-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dsw-alias-state-warn-primary);
-}
-.ttl-gantt-dot[data-status='completed'] { background: var(--dsw-alias-state-success-primary); }
-.ttl-gantt-title {
-  flex: 1;
-  min-width: 0;
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ttl-gantt-track { position: relative; flex: none; height: 100%; }
-.ttl-gantt-grid {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--dsw-alias-border-l1);
-}
-.ttl-gantt-bar {
-  position: absolute;
-  top: 7px;
-  height: 16px;
-  border-radius: 8px;
-  overflow: hidden;
-  /* 时间条从左向右「画」出来，呼应创建 → 完成的时间方向。 */
-  animation: ttl-bar-draw 420ms var(--ttl-ease-out) both;
-}
-.ttl-gantt-bar-completed { background: var(--dsw-alias-state-success-secondary); }
-.ttl-gantt-bar-ongoing {
-  background: var(--dsw-alias-state-business-primary);
-  border-right: 2px dashed var(--dsw-alias-label-primary-foreground);
-  box-sizing: border-box;
-}
-.ttl-gantt-bar-flag {
-  position: absolute;
-  right: 4px;
-  top: 0;
-  bottom: 0;
+.ttl-gantt-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  color: var(--dsw-alias-label-primary-foreground);
-  font-size: 10px;
-  line-height: 1;
-  white-space: nowrap;
+  gap: 4px 14px;
+  padding: 7px 10px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+.ttl-gantt-legend { display: inline-flex; align-items: center; gap: 5px; }
+.ttl-gantt-legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-secondary);
+}
+.ttl-gantt-legend-swatch[data-kind='ongoing'] { background: var(--dsw-alias-state-business-primary); }
+.ttl-gantt-legend-swatch[data-kind='now'] {
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--dsw-alias-state-error-primary);
+}
+.ttl-gantt-footer-summary { margin-left: auto; }
+@media (max-width: 720px) {
+  .ttl-gantt {
+    --ttl-gantt-label-width: 168px;
+    --ttl-gantt-duration-width: 84px;
+  }
+}
+@media (max-width: 560px) {
+  .ttl-gantt {
+    --ttl-gantt-label-width: 148px;
+    --ttl-gantt-duration-width: 76px;
+  }
 }
 .ttl-chat {
   margin-bottom: 16px;
