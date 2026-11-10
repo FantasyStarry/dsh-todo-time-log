@@ -130,6 +130,13 @@ check(
   'quick entry reuses host routes',
   /\/quick-add/.test(src) && /['"]\/complete['"]/.test(src) && /['"]\/uncomplete['"]/.test(src)
 );
+// 偏好开关：设置 → 通用的一行，读写 Host 侧偏好（与待办数据分开）。
+check('registers settings.general.item slot', /slots\.inject\(\s*['"]settings\.general\.item['"]/.test(src));
+check('preference switch styled', /\.ttl-pref-switch\s*\{/.test(src));
+check(
+  'preference uses host settings routes',
+  /['"]\/settings['"]/.test(src) && /['"]\/settings\/update['"]/.test(src)
+);
 
 console.log(`\ni18n keys per language: ${zhKeys.length}; alias tokens: ${tokens.length}; class names: ${classNames.length}`);
 if (failures.length > 0) {

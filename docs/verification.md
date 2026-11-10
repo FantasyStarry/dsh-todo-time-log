@@ -1136,3 +1136,77 @@ node .tools/quick-preview/probe.mjs quick-entry 916 640       # 量几何（也�
 **PASS（逻辑 / 静态 / 渲染）**：两个槽位注册、四条状态（关闭 / 打开 / 勾掉+撤销 / 新建）与错误态、键盘与焦点归还、两套样式互不污染、明暗与 640 窄屏的几何关系均有独立证据；发现并修复的半透明材质缺陷（F1）已复核。
 
 **真机需刷新页面后人工确认**：槽位与宿主其它 occupant 的混排、真实点击/焦点手感、英文界面折行、以及 `@` 菜单与卡片同时打开时的层级观感。
+
+---
+
+## 27. 十五期：快速入口的开关（0.7.0）
+
+**背景**：十四期把「待办」胶囊常驻在主输入框下方，但没有任何开关——不想要它的人只能忍。十五期给它加了一个宿主原生的偏好入口：**设置 → 通用**里的一行（`settings.general.item`，id `dsh-todo-time-log`，`order: 40`，在宿主自己的 `developer-tools`(15) 与 `current-version`(100) 之间）。默认开；关掉立刻卸载两个快速入口槽位（胶囊 + 清单，60s 轮询也随之停止），重新打开恢复。
+
+- **偏好存在 Host 侧**（浏览器与会话无关）：`<数据文件同目录>/todos.settings.json`，信封 `{ version: 1, updatedAt, settings: { quickEntry } }`。与 `todos.json` 分开的理由：`todos.json` 的 `version` 是严格契约（旧版本会归档重建），UI 偏好不该逼着它升版本；且偏好由浏览器写、待办由 UI 与 agent 工具写，分开后一次偏好写入不可能动到待办数据。
+- **路由**：`POST /settings`（读，缺失即默认 `true`）、`POST /settings/update`（写，只收已知键、类型必须是布尔）。错误码映射：`SETTINGS_INVALID`→400、`SETTINGS_WRITE_FAILED`→500、`SETTINGS_UNAVAILABLE`→501（宿主没给 settings store 的旧环境）。
+- **客户端语义**：读失败 **fail-open**（按默认开挂载，原因显示在设置行内）；写失败 **不乐观翻转**（开关保持原状态 + 行内提示），避免出现「开关显示关了但胶囊还在」的两套状态。
+
+### 27.1 验证口径
+
+本节是**独立复核**，不复用 `test/` 下的用例：门禁 + 自己写的 Host/HTTP 断言 + 自己写的 jsdom 客户端断言（槽位是「会真的挂载组件」的假宿主）+ 真实浏览器几何探针。
+
+| 层 | 工具 | 产物 |
+| --- | --- | --- |
+| 门禁 | `npm run verify`（check / lint / typecheck / build / test / audit） | 见 27.2 |
+| Host + HTTP | `.tools/verify/settings-host.mjs`（真实文件 I/O + 真实 `http.createServer(createHttpHandler(...))`） | **27 条** |
+| Client | `.tools/verify/settings-client.mjs`（jsdom 求值 `lib/client.js`，`slots.register` 会用 React 真挂载、disposer 会真卸载） | **10 条** |
+| 视觉 + 几何 | `.tools/quick-preview/render-settings.mjs` + `.tools/quick-preview/probe-settings.mjs` | 2 张图 + 硬数字 |
+
+### 27.2 结果
+
+| 项 | 证据 | 结论 |
+| --- | --- | --- |
+| 构建与门禁 | `npm run verify` exit 0：`node --check` **8** 个 lib 文件、eslint、tsc 通过；build **328,239 B / 8,898 行**；`npm test` **497 passed / 0 failed**；audit **36 项全 PASS**（i18n **314** 键/语言、**28** 个 alias token、**285** 个 `ttl-` 类名；新增 `registers settings.general.item slot` / `preference switch styled` / `preference uses host settings routes`） | PASS |
+| 偏好文件位置 | `resolveSettingsFile('…/todos.json')` → `…/todos.settings.json`（同目录同主名，无扩展名与多段扩展名都不误吃） | PASS |
+| 默认与容错 | 文件缺失 → `{quickEntry:true}` 且**不创建文件**；损坏 JSON → 回落默认 + 一次 warn + 下次写入覆盖；非法类型（`'off'`/`0`/`null`）不写盘且返回 `SETTINGS_INVALID`；空补丁是无害 no-op | PASS |
+| 写入与原子性 | 落盘为带 `version`/`updatedAt` 的信封；写完目录里没有任何 `.tmp-*` 残留；新实例能从磁盘读回；写入失败（目标被目录占用）返回 `SETTINGS_WRITE_FAILED` 且 `describe().lastPersistError` 有内容 | PASS |
+| 并发（**修复后**） | 30 个冷缓存 store × 3 个同时发起的 `update(false/true/false)`，每轮磁盘与缓存都必须是「最后发起」的值 | PASS（见 27.3 F1） |
+| 真实 HTTP | `POST /settings` 默认 true 且不建文件；`/settings/update {quickEntry:false}` → 200 + 落盘 + 读回一致；非法类型 → 400 且磁盘字节不变；未知键被忽略；`GET /settings` → 405 `METHOD_NOT_ALLOWED`；无 settingsStore → 两条路由都 501；`/health` 仍 200、未知路由仍 404；偏好写入不动 `todos.json` | PASS |
+| 客户端行为（jsdom） | 挂载后行渲染出标题/说明/`role="switch"`（`aria-checked`/`data-checked`/`aria-label` 齐全、默认 `true`）；点开关发 `/settings/update {quickEntry:false}` → **dock 与 overlay 两个槽位都归零、胶囊从 DOM 消失**；再点恢复并重新 `/list`；关掉后 60s 轮询的 Timeout 回落到基线、重开再起；偏好为关时首屏不挂、从设置里打开才出现；读失败 fail-open + 行内 `role="alert"`；写失败不翻转 + 行内提示；写入中 `disabled` + `aria-busy`，连点不重复发请求 | PASS |
+| 样式隔离 | `pref-styles` 与 `quick-styles` 两张样式表同时存在且互不含对方的类名；`.ttl-pref-row` 计算值 `display:flex` + 16px 上下内边距 | PASS |
+| 静态 | 产物里有 `settings.general.item`（id/order 正确）与两条 settings 路由；`.ttl-pref-*` 内 **0** 处 hex/rgb/具名色，CSS 变量全是 `--dsw-*`/`--ttl-*`；`lib/index.js` 三处错误码映射齐全；`package.json` 的 check / files / test 都登记了新文件 | PASS |
+
+### 27.3 发现的问题
+
+| 编号 | 严重度 | 现象 | 定位 | 状态 |
+| --- | --- | --- | --- | --- |
+| F1 | 中（并发） | `npm run verify` **间歇失败**：`createSettingsStore：并发写入串行化…` 期望最终 `false` 实得 `true`（我连跑 5 次命中 1 次） | `lib/settings.js` 的 `update()` 在 `await read()` **之后**才 `chain = chain.then(write)`，入队顺序取决于 I/O 完成顺序而非调用顺序；`cache = next` 同样在 await 之后，可能被更早的调用覆盖回去。两个浏览器标签页同时拨开关即可触发 | **已修**（Lead 改成「整个 read-modify-write 事务在调用点同步入队」，写失败在事务内转成 `SETTINGS_WRITE_FAILED`）。复核：独立脚本 30 轮冷缓存并发全绿；仓库新增的 30 轮确定性用例连跑 6 次通过 |
+| O1 | 提示（视觉） | 设置行的说明文字比宿主相邻行**更淡**：我们的 `rgb(129,133,140)`（`--dsw-alias-label-tertiary`）vs 宿主 General 行的 `rgb(97,102,107)`（`--dsw-alias-label-secondary`） | `PREF_CSS_TEXT` 的 `.ttl-pref-desc` 取色比宿主行低一档 | **已修**（Lead 复核后把 `.ttl-pref-desc` 改成 `--dsw-alias-label-secondary`，与宿主 `DeveloperToolsRow` 一致；两张图已按新样式重出） |
+| O2 | 提示（视觉） | 标题行高 **22px**，宿主 General 行的标题是 **20px**（`DeveloperToolsRow.module.css`）；CSS 注释写的是「对齐宿主 14/22」 | `.ttl-pref-title { line-height: 22px }` | **已修**（`.ttl-pref-title` 改 `line-height: 20px`，CSS 注释同步为「14/20」） |
+| O3 | 提示（视觉） | 文本与开关之间的留白 **56px**（行 `gap: 8px` + `.ttl-pref-text { padding-right: 48px }`），宿主同形行是 `gap: 24px`；文字列因此比宿主窄 32px | `PREF_CSS_TEXT` 的 `.ttl-pref-text` | **已修**（去掉 `padding-right: 48px`，行 `gap` 改 24px，与宿主 `DeveloperToolsRow` 同节奏；文字列恢复与宿主同宽） |
+| O4 | 提示（预览） | 预览里导航图标、相邻宿主行（外观的分段控件、显示代码工作视图的开关）、遮罩下的背景都是**按宿主规格画的占位**，不是宿主组件；面板高度按内容自适应（宿主是固定 800×800） | 出图脚本的取舍 | 记录（已在 `docs/images/README.md` 说明） |
+
+浏览器实测几何（`.tools/quick-preview/probe-settings.mjs`，视口 980×560）：面板 **800**、左侧导航列 **188**、内容列 **612**（`padding: 0 24px 24px`，可用 **564**）；我们的开关 **36×20**，右边缘 **866**，与宿主同形行（显示代码工作视图）的开关**完全对齐**；行 `padding: 16px 0` + `border-bottom: 0.5px` + `gap: 24px`，标题 14/20、说明 12/18 且取 `label-secondary`（O1–O3 修复后与宿主 `DeveloperToolsRow` 同一套参数）；截图 1960×1120（DSF 2），无裁切。
+
+### 27.4 盲区与 NOT VERIFIED
+
+- **设置页本身由宿主渲染**：本机只能验证我们那一行的组件与开关语义，验证不了宿主如何把这行放进 `settings.general.item` 列表、导航高亮、面板开合与焦点管理。
+- **真机 GUI 点击**：没有浏览器控制能力，全部交互都在 jsdom 里用真实组件 + mock fetch 驱动；真机的开关手感、`focus-visible` 焦点环、触屏与键盘（Space/Enter）操作未验证。
+- **真实宿主 Switch 组件**：客户端产物只允许 `require('react')`，拿不到宿主 primitives 的 Switch，所以我们的开关是自绘的；「36×20 与宿主同规格」来自宿主 CSS 的排版参数与预览肉眼对照，没有拿到 primitives 的源码级取值。
+- **多标签页即时同步**：偏好存在 Host 侧，另一个标签页要刷新才会看到；没有做跨标签页实时广播（设计上也不做）。
+- **`todos.settings.json` 的手工损坏恢复**：损坏会回落默认并在下次写入覆盖，但没有做「把损坏文件归档」——偏好的值可由 UI 重新设置，故未归档。
+- **构建产物加载时机**：与既往各期一致，**Host 半需重启插件、Client 半需刷新页面**才会生效。
+
+### 27.5 复现方式
+
+```bash
+npm run verify                                    # 门禁：497 用例 / audit 36 项
+node .tools/verify/settings-host.mjs              # Host 偏好层 + 真实 HTTP 27 条
+node .tools/verify/settings-client.mjs            # 设置行 jsdom 行为 10 条
+node .tools/quick-preview/render-settings.mjs     # 出 2 张图到 docs/images/
+node .tools/quick-preview/probe-settings.mjs settings-quick-entry 980 560   # 量几何
+```
+
+> 出图前需要宿主设置页 CSS：`.tools/refs-settings/`（用 `node .tools/asar.cjs "<DSH>/resources/app.asar" extract "dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-general" .tools/refs-settings` 抽出，`.tools/` 不随仓库提交）。
+
+### 27.6 结论
+
+**PASS（逻辑 / 契约 / 渲染）**：偏好文件的默认值、容错、原子写、并发与两条 HTTP 路由的错误码全部有独立证据；客户端「开/关 → 卸载/恢复」是**真实挂载与卸载**验证的（不是只数注册次数），fail-open 与「写失败不翻转」也都覆盖。发现并修复的并发竞态（F1）已复核；3 条视觉差异（O1–O3）已按宿主 `DeveloperToolsRow` 口径修掉，两张预览图按新样式重出。
+
+**真机需重启插件 + 刷新页面后人工确认**：设置页里这一行的位置与观感、开关手感与焦点环、以及关掉后主输入框下方确实不再出现「待办」胶囊。

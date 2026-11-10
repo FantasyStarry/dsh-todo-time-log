@@ -44,6 +44,7 @@
     "lib/parse.js",
     "lib/store.js",
     "lib/transfer.js",
+    "lib/settings.js",
     "lib/time.js",
     "lib/client.js",
     "cordis.patch.yml",
@@ -65,11 +66,11 @@
   },
   "scripts": {
     "build": "node scripts/build-client.mjs",
-    "check": "node --check lib/time.js && node --check lib/parse.js && node --check lib/files.js && node --check lib/store.js && node --check lib/transfer.js && node --check lib/index.js && node --check lib/client.js",
+    "check": "node --check lib/time.js && node --check lib/parse.js && node --check lib/files.js && node --check lib/store.js && node --check lib/transfer.js && node --check lib/settings.js && node --check lib/index.js && node --check lib/client.js",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/ui/quick.test.mjs test/store-concurrency.test.mjs",
-    "test:coverage": "node --test --experimental-test-coverage test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/ui/quick.test.mjs test/store-concurrency.test.mjs",
+    "test": "node --test test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/http-settings.test.mjs test/settings.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/ui/quick.test.mjs test/store-concurrency.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/http-settings.test.mjs test/settings.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/ui/quick.test.mjs test/store-concurrency.test.mjs",
     "audit": "node test/client-audit.mjs",
     "verify": "npm run check && npm run lint && npm run typecheck && npm run build && npm test && npm run audit",
     "prepublishOnly": "npm run verify"

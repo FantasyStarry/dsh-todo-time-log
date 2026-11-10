@@ -25,6 +25,7 @@
 | 快速入口：清单卡片入场 | 淡入 + 上移 6px（`ttl-quick-in`） | 160ms `cubic-bezier(0.22, 0.61, 0.36, 1)` |
 | 快速入口：行入场 / 卡片内提示 | 行淡入（`ttl-quick-row-in`）；提示淡入 + 上移 4px（`ttl-quick-notice-in`） | 180ms / 160ms |
 | 快速入口：勾选 | 行即时移除 + 卡片内提示「已完成 · 用时 X [撤销]」；清单里的勾选圈固定 `scale(0.85)`，不做对勾放大 | —（即时） |
+| 设置开关（设置 → 通用） | 轨道 `background-color` 过渡 + 圆点 `translateX(0 → 16px)` | 150ms `cubic-bezier(0.22, 0.61, 0.36, 1)` |
 
 > 快速入口的「勾选」只有状态结果，没有对勾回弹：面板那套 0.55→1 / 200ms spring 依赖 `data-checked` 切换，而清单里完成的行会立刻从列表移除。若以后要给快速入口补回弹，需要让该行在移除前保留一拍，这会与下面「退出动画不做」的既有约定冲突，请先改基线再动实现。
 
@@ -38,7 +39,7 @@
 
 `@media (prefers-reduced-motion: reduce)` 下对 `.ttl-root` 内所有元素强制 `animation: none; transition: none`，包含骨架屏与 Toast。
 
-快速入口不在 `.ttl-root` 下（它挂在 composer 的槽位里），所以 `QUICK_CSS_TEXT` 自带一份同样的兜底，覆盖 `.ttl-quick-trigger` / `.ttl-quick-panel` 及其伪元素与后代 —— 两处成对存在，改一处要同步另一处。
+快速入口不在 `.ttl-root` 下（它挂在 composer 的槽位里），所以 `QUICK_CSS_TEXT` 自带一份同样的兜底，覆盖 `.ttl-quick-trigger` / `.ttl-quick-panel` 及其伪元素与后代 —— 两处成对存在，改一处要同步另一处。设置开关行同理（`PREF_CSS_TEXT`），兜底覆盖 `.ttl-pref-switch` 与圆点。
 
 ## 实现位置
 
@@ -46,6 +47,7 @@
 | --- | --- |
 | `src/client/styles.js` | 动效令牌（`--ttl-ease-*` / `--ttl-dur-*`）、全部 `@keyframes`、各组件动画挂载、`prefers-reduced-motion` 兜底 |
 | `src/client/styles.js` 的 `QUICK_CSS_TEXT` + `QuickStyleSheet` | 快速入口专用：`ttl-quick-in` / `ttl-quick-row-in` / `ttl-quick-notice-in` / `ttl-quick-breathe` 四个 keyframes、胶囊 hover/active（0.98）过渡、`.ttl-quick-*` 的 reduced-motion 兜底 |
+| `src/client/styles.js` 的 `PREF_CSS_TEXT` + `PrefStyleSheet` | 设置开关行：轨道变色 + 圆点位移（150ms）、焦点环、`.ttl-pref-*` 的 reduced-motion 兜底；行排版对齐宿主 General 行 |
 | `src/client/views/table.js` / `views/board.js` | 行 / 卡片入场错位的 `animation-delay` |
 | `src/client/quick.js` | 挂载时机决定动画频率：清单只在 `open` 时挂载（关闭即时卸载、无退出动画），所以 `ttl-quick-in` 每次展开只播一次；行按 `todo.id` 做 key，静默刷新时已有行不重挂载，只有新出现的行播 `ttl-quick-row-in` |
 

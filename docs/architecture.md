@@ -16,9 +16,10 @@ dsh-todo-time-log/
 │   └── en.json             # 显示名与描述（英文）
 ├── src/client/             # ★ Client 半源码（ES 模块，npm run build 用 esbuild 打包）
 │   ├── index.js            # 入口：window.__ModuleLoader__.load({ id, factory })
-│   ├── app.js              # 模块对象：main + sidebar.panellist + 两个快速入口槽位注册
+│   ├── app.js              # 模块对象：main / sidebar / 设置行 / 快速入口槽位与偏好接线
 │   ├── panel.js            # 面板主体：状态 / 请求 / 交互（不含四个视图实现）
-│   ├── quick.js            # 主输入框旁的快速入口：胶囊（composer.dock）+ 清单卡片（input.overlay）
+│   ├── quick.js            # 主输入框旁的快速入口：胶囊（composer.dock）+ 清单卡片（input.overlay），可 mount / unmount
+│   ├── prefs.js            # 「设置 → 通用」开关：偏好控制器（读 / 写 / 应用）+ 设置行组件（role=switch）
 │   ├── views/              # table / board / gantt / calendar 四视图
 │   ├── widgets.js          # 小组件 / 图标 / 对话录入等
 │   ├── detail.js           # 详情区
@@ -37,25 +38,28 @@ dsh-todo-time-log/
 │   ├── parse.js            # ★ 统一自然语言解析（对话面板 / /todo 命令共用）
 │   ├── files.js            # ★ 工作区文件索引（ctx.fs 只读遍历 + 缓存，供 @ 补全）
 │   ├── transfer.js         # ★ 导入 / 导出格式：JSON 信封 + CSV 读写（纯函数）
+│   ├── settings.js         # ★ Client 偏好：`<dataFile>.settings.json`（信封 v1 + 原子写 + 读改写整体入队）
 │   └── client.js           # 构建产物（勿手改；由 src/client/ 打包生成，仍是单文件模块表）
 ├── test/
 │   ├── parse.test.mjs      # 自然语言解析 / 文件路径 / 分类派生（79 用例，node:test）
 │   ├── smoke.test.mjs      # 数据层 / 时间 / 修复 / 分类 / 文件 / 迁移 / 持久化（174 用例）
 │   ├── http.test.mjs       # 真实 HTTP 路由端到端（77 用例，含宿主认证 401/403）
+│   ├── settings.test.mjs   # Client 偏好存储：路径 / 归一化 / 信封落盘 / 损坏回落 / 并发 last-write-wins（15 用例）
+│   ├── http-settings.test.mjs # /settings 与 /settings/update 端到端：默认值 / 400 / 501（9 用例）
 │   ├── transfer.test.mjs   # 导出 / 导入格式：JSON v1–v5、CSV 转义、别名、非法行
 │   ├── store-import.test.mjs # 导入合并策略 / 备份 / 撤销 / 数量上限
 │   ├── http-transfer.test.mjs # /export、/import、/restore 端到端
 │   ├── store-concurrency.test.mjs  # 跨进程写入：mtime 合并 + 文件锁（8 用例）
-│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（18 用例）
+│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（22 用例）
 │   │   ├── panel.test.mjs  # 面板：页头 / 新建框 / 四视图 / 空态 / 错误 / 数据对话框 / 行尾菜单 / 对话录入（10 用例）
-│   │   └── quick.test.mjs  # 快速入口：胶囊计数 / 展开 / 勾掉 + 撤销 / 快速新建 / 空态 / 错误重试 / Esc / 打开面板（8 用例）
+│   │   └── quick.test.mjs  # 快速入口 + 设置行：计数 / 展开 / 勾掉 + 撤销 / 快速新建 / 空态 / 错误 / Esc / 开关卸载与恢复（12 用例）
 │   ├── live-utf8.py        # 对运行中实例的真实 UTF-8 往返检查（需 DSH_WEB_URL）
 │   ├── live-projects.py    # 对运行中实例的分类/迁移/筛选真实往返检查
-│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图、快速入口两槽位）
+│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图、快速入口两槽位 + 设置行与偏好路由）
 ├── docs/
 │   ├── architecture.md     # 架构与关键代码：目录结构 / 数据模型 / 双调用方入口 / 四视图（本文档）
 │   ├── development.md      # 测试（自动化 + 手工验证清单）与 npm 发布流程
-│   ├── limitations.md      # 已知限制与 TODO（11 条，含不确定处与适配层）
+│   ├── limitations.md      # 已知限制与 TODO（12 条，含不确定处与适配层）
 │   ├── verification-log.md # 本机验证记录（按阶段累积的自验证据表）
 │   ├── verification.md     # 独立验证报告（另一个 agent 产出，含 PASS/FAIL/盲区）
 │   ├── publishing.md       # npm 发布流程：bootstrap / Trusted Publisher / 版本策略 / 排错
@@ -255,8 +259,13 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
           { name: 'sidebar.panellist', id: 'dsh-todo-time-log', order: 30,
             label: () => '待办时间日志' }, Icon));                         // 侧边栏入口
-        registerQuickEntry(ctx);                                         // 主输入框旁快速入口
-        // 内部再注册两个槽位（见 §3.10）：
+        const quickEntry = createQuickEntry(ctx);                        // 快速入口（可 mount / unmount）
+        const pref = createQuickEntryPreference(quickEntry);             // 设置 → 通用 开关
+        ctx.slots.inject('settings.general.item', () => ctx.slots.register(
+          { name: 'settings.general.item', id: 'dsh-todo-time-log', order: 40 },
+          pref.Row));                                                     // 设置行
+        void pref.load();                       // 读偏好：开 → quickEntry.mount()，关 → unmount()
+        // createQuickEntry 内部再注册两个槽位（见 §3.10）：
         //   conversation.composer.dock   → 「待办」胶囊（常驻）
         //   conversation.input.overlay   → 展开的清单卡片（锚在 composer 上沿之上）
       },
@@ -267,14 +276,15 @@ window.__ModuleLoader__.load({
 
 侧边栏 list 槽的 id 与 `main` keyed 槽的 key 相同，宿主据此把点击事件路由到本面板（与官方 `dsh-context` 插件一致的模式）。面板样式只用 `--dsw-alias-*` 主题 token、类名统一 `ttl-` 前缀，随宿主明暗主题切换。
 
-**快速入口的两处注册**（`registerQuickEntry(ctx)`，两处 `id` 都是 `dsh-todo-time-log`）：
+**快速入口与开关的注册**（快速入口两处 `id` 都是 `dsh-todo-time-log`）：
 
 | 槽位 | 组件 | 说明 |
 | --- | --- | --- |
 | `conversation.composer.dock` | `QuickTrigger`（`.ttl-quick-trigger`，`order: 40`） | 输入框下方的常驻「待办」胶囊，显示未完成条数；点击切换清单 |
 | `conversation.input.overlay` | `QuickOverlay`（`.ttl-quick-panel`） | 展开的清单卡片，锚在 composer 卡片上沿之上（`position: absolute; bottom: calc(100% + 8px)`），与宿主 `@` 菜单同一套做法，不会被 docked composer 裁切 |
+| `settings.general.item` | `pref.Row`（`.ttl-pref-row`，`order: 40`） | 「设置 → 通用」里的一行：标题「主输入框下方的待办快捷入口」+ 说明 + 右侧开关（`role="switch"`）。关掉 → 卸载前两个槽位（胶囊、清单、60s 轮询一起停），重开 → 重新挂载 |
 
-两个槽位都用 `ctx.slots.inject(...)` 包裹（宿主有该槽位才注入），注册失败只 `console.warn`、不影响面板本体 —— 与「缺服务保持 pending 而不是崩溃」的 Host 半约定一致。细节见 §3.10。
+三个槽位都用 `ctx.slots.inject(...)` 包裹（宿主有该槽位才注入），注册失败只 `console.warn`、不影响面板本体 —— 与「缺服务保持 pending 而不是崩溃」的 Host 半约定一致。快速入口的两个槽位不是直接注册，而是由 `createQuickEntry().mount()` / `unmount()` 按偏好决定挂载（幂等，见 §3.10 的「开关」小节）。
 
 **源码与产物**：上图的单文件模块表是构建产物 `lib/client.js`，源码在 `src/client/`（入口 / 面板 / 四视图 / 小组件 / i18n / 样式等 ES 模块）。`npm run build` 用 esbuild 打包回同一形态（IIFE、`charset=utf8`、不 minify、不打包 react），发布物与加载方式都不变；`lib/client.js` 不要手改。
 
@@ -438,7 +448,7 @@ UI 侧：**分类是可选的选择器，不用手打**——
 | `notice` | 卡片内提示 `{id, kind, text, undo}`，默认 6s 自动消失，绝对定位在卡片底部（不推动列表） |
 | `busyId` / `adding` | 单条操作进行中态：防连点，期间勾选圈禁用 |
 
-**数据契约**（不新增接口，全部复用既有 Host 路由）：
+**数据契约**（待办数据不新增接口，全部复用既有 Host 路由；开关偏好另有两条 `/settings` 路由，见本节末尾）：
 
 | 动作 | 调用 |
 | --- | --- |
@@ -454,3 +464,46 @@ UI 侧：**分类是可选的选择器，不用手打**——
 **不监听 `document` 做「点外部关闭」**：客户端产物只允许一处只读 `document.activeElement`（`test/client-audit.mjs` 的 `single composer draft reader` / `no direct DOM query` 门禁），关闭路径收敛为「再点胶囊 / `Esc` / ×」三种显式操作，避免 document 级监听在宿主多面板环境里互相打架。
 
 **样式**：`src/client/styles.js` 的 `QUICK_CSS_TEXT` + `QuickStyleSheet` 单独一份，不塞进面板 CSS —— 面板未挂载时（用户正在聊天）快速入口也要完整可用；类名一律 `ttl-quick-*`，不依赖面板的 `.ttl-check` / badge 样式，避免两套 CSS 互相影响；圆角同心（卡片 12 = 行 8 + 内边距 4），只用主题 token。
+
+#### 开关（设置 → 通用，十五期）
+
+不想看到这枚胶囊的人可以在 DSH 的「设置 → 通用」里关掉它。开关行注册到宿主 `settings.general.item` 槽位（`id: dsh-todo-time-log`、`order: 40`）：标题「主输入框下方的待办快捷入口」+ 说明 + 右侧自绘开关。自绘原因：客户端产物只允许 `require('react')`，拿不到宿主 primitives 的 Switch；排版按宿主 General 行口径（14/20 标题、12/18 说明且取 `label-secondary`、`gap: 24px`、16px 上下留白、0.5px 底分隔），开关 36×20 轨道 + 16px 圆点（`.ttl-pref-switch` / `.ttl-pref-knob`，`role="switch"` + `aria-checked` + `aria-busy`，加载与写入中 `disabled`）。
+
+| 行为 | 实现 |
+| --- | --- |
+| 关闭 | `createQuickEntry().unmount()` 注销 `conversation.composer.dock` / `conversation.input.overlay` 两处注册 → 胶囊、清单与组件里的 60s 轮询一起消失，不再发 `/list` |
+| 打开 | `mount()` 重新注册两个槽位（幂等：已挂载时重复调用直接返回 `false`，不会重复注册） |
+| 首屏 | `apply()` 里先 `pref.load()` 读一次偏好；读到「关」就**根本不挂载**（不是挂载后隐藏），所以不会多打一次 `/list` |
+| 不影响 | 面板、`/todo` 命令与待办数据完全不受影响 —— 只是不再注册那两个槽位 |
+
+**偏好文件**：与待办数据同目录、同主名 —— `<dataFile>` → `<主名>.settings.json`（默认 `~/.dsh/todo-time-log/todos.settings.json`）。信封：
+
+```json
+{
+  "version": 1,
+  "updatedAt": "2026-11-10T04:00:00.000Z",
+  "settings": { "quickEntry": true }
+}
+```
+
+写入是「临时文件 + rename」（Windows 下 rename 被占用时回退为覆盖写）；**整段「读 → 合并 → 写」作为一个事务入队**（在调用时就同步排到同一条 Promise 链上，而不是 await 之后才排），所以并发多次切换按调用顺序落盘、最后一次调用生效（last-write-wins）；单次写失败只折成 `SETTINGS_WRITE_FAILED` 返回值，链不会保持 rejected、后续切换照常执行。文件不存在 = 默认值（`quickEntry: true`）；损坏 / 不可读时按默认值工作并记一条 warn，下一次写入直接覆盖它。`normalizeSettings()` 同时接受扁平 `{quickEntry}` 与信封两种形态（前向兼容），未知键丢弃。
+
+**为什么偏好不塞进 `todos.json` 的 `version` 信封**：
+
+- todos 信封的 `version` 是严格契约（旧版插件遇到不支持的版本会归档并重建），为一个 UI 偏好升版会把待办数据一起推到风险里；
+- 待办由 UI 与智能体工具共用写，偏好只由浏览器写、每次打开页面读一次；分成两个文件，「写偏好」就永远不会扰动「写待办」（也就不会牵动导入导出的 `.bak-*` 备份与跨进程合并那一整套）。
+
+**路由**（`lib/index.js`，与待办路由同一前缀 `/api/dsh-todo-time-log`，共用宿主认证）：
+
+| 路由 | 作用 | 返回 / 错误 |
+| --- | --- | --- |
+| `POST /settings` | 读偏好 | `{ok:true, value:{quickEntry:boolean}}`；没有设置存储时 501 `SETTINGS_UNAVAILABLE`（其余方法回落 405） |
+| `POST /settings/update` | 写偏好（body `{quickEntry:boolean}`） | `{ok:true, value:{quickEntry}}`；非对象 / 非布尔 400 `SETTINGS_INVALID`（整单拒绝，不改磁盘）；落盘失败 500 `SETTINGS_WRITE_FAILED`；无设置存储 501 `SETTINGS_UNAVAILABLE` |
+
+已知键类型不对时整单拒绝而不是静默丢弃 —— 静默丢弃会把开关卡在用户没选中的状态。未知键被忽略（前向兼容）。
+
+**fail-open 与错误展示**（`src/client/prefs.js`）：
+
+- 读失败（网络 / 501 / 坏响应）→ 按默认「开」挂载，设置行下方用 `role="alert"` 显示「读取设置失败，暂按默认（开）处理：…」；
+- 写失败 → **不乐观翻转**：开关保持原状态、胶囊保持原样，显示「保存失败，已保持原状态：…」，避免出现「开关显示关了但胶囊还在」的两套状态；
+- 偏好存在 Host 侧，所以同一实例的每个已认证浏览器读到同一个值（A 浏览器关掉，B 浏览器刷新后也不显示）。

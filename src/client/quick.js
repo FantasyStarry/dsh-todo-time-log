@@ -465,13 +465,25 @@ function QuickNotice(props) {
 }
 
 /**
- * 槽位注册：胶囊进 dock、清单进 composer overlay。两个槽位在旧宿主上可能不存在，
- * 注册失败只 warn，不影响面板本体。
+ * 快速入口：胶囊进 composer dock、清单进 composer overlay。
+ *
+ * 不在 apply 时直接挂载，而是返回 `mount` / `unmount`：偏好开关（设置 → 通用）
+ * 决定要不要挂；开关关闭时两个槽位一起卸载，胶囊、清单与 60s 轮询全部停止。
+ * 两个槽位在旧宿主上可能不存在，注册失败只 warn，不影响面板本体。
+ *
  * @param {object} ctx - 客户端插件上下文。
- * @returns {{ Trigger: Function, Overlay: Function }} 便于测试直接挂载。
+ * @returns {{
+ *   mount: () => boolean,
+ *   unmount: () => boolean,
+ *   isMounted: () => boolean,
+ *   Trigger: Function,
+ *   Overlay: Function,
+ * }} 便于偏好开关与测试直接驱动。
  */
-export function registerQuickEntry(ctx) {
+export function createQuickEntry(ctx) {
   const store = createQuickStore(ctx);
+  /** @type {Array<() => void>} */
+  let disposers = [];
   const warn = (slot, error) => {
     try {
       if (typeof console !== 'undefined' && typeof console.warn === 'function') {
@@ -656,19 +668,51 @@ export function registerQuickEntry(ctx) {
     );
   }
 
-  try {
-    ctx.slots.inject('conversation.composer.dock', () =>
-      ctx.slots.register({ name: 'conversation.composer.dock', id: PANEL_ID, order: 40 }, QuickTrigger)
-    );
-  } catch (error) {
-    warn('conversation.composer.dock', error);
+  /**
+   * 挂载两个槽位（幂等）：偏好开关从「开」切回「开」、或设置还没读到时重复调用都安全。
+   * @returns {boolean} 本次是否真的新挂了槽位。
+   */
+  function mount() {
+    if (disposers.length > 0) return false;
+    const next = [];
+    try {
+      next.push(
+        ctx.slots.inject('conversation.composer.dock', () =>
+          ctx.slots.register({ name: 'conversation.composer.dock', id: PANEL_ID, order: 40 }, QuickTrigger)
+        )
+      );
+    } catch (error) {
+      warn('conversation.composer.dock', error);
+    }
+    try {
+      next.push(
+        ctx.slots.inject('conversation.input.overlay', () =>
+          ctx.slots.register({ name: 'conversation.input.overlay', id: PANEL_ID, order: 40 }, QuickOverlay)
+        )
+      );
+    } catch (error) {
+      warn('conversation.input.overlay', error);
+    }
+    disposers = next.filter((dispose) => typeof dispose === 'function');
+    return true;
   }
-  try {
-    ctx.slots.inject('conversation.input.overlay', () =>
-      ctx.slots.register({ name: 'conversation.input.overlay', id: PANEL_ID, order: 40 }, QuickOverlay)
-    );
-  } catch (error) {
-    warn('conversation.input.overlay', error);
+
+  /** 卸载两个槽位：开关关闭时调用，胶囊与清单一起消失、轮询也随组件卸载停止。 */
+  function unmount() {
+    if (disposers.length === 0) return false;
+    const pending = disposers;
+    disposers = [];
+    for (const dispose of pending) {
+      try {
+        dispose();
+      } catch (ignored) {
+        // 已随作用域销毁的注册器再 dispose 会抛错，忽略即可。
+      }
+    }
+    return true;
   }
-  return { Trigger: QuickTrigger, Overlay: QuickOverlay };
+
+  const isMounted = () => disposers.length > 0;
+
+  return { mount, unmount, isMounted, Trigger: QuickTrigger, Overlay: QuickOverlay };
 }

@@ -10,12 +10,12 @@
 
 ```bash
 npm run build     # esbuild：src/client/ → lib/client.js（单文件产物）
-npm run check     # 七个 lib 文件（time/parse/files/store/transfer/index/client）的 node --check
+npm run check     # 八个 lib 文件（time/parse/files/store/transfer/settings/index/client）的 node --check
 npm run lint      # ESLint（flat config；构建产物 lib/client.js 不直接 lint，lint src/client/）
 npm run typecheck # tsc --checkJs：Host 模块的 JSDoc 类型检查
-npm test          # node:test：解析 / 数据层 / HTTP / 导入导出 / UI 渲染 / 并发写入（469 用例）
+npm test          # node:test：解析 / 数据层 / HTTP / 设置偏好 / 导入导出 / UI 渲染 / 并发写入（497 用例）
 npm run test:coverage  # 同上 + Node 内置覆盖率（--experimental-test-coverage）
-npm run audit     # client.js 静态审计（33 项）
+npm run audit     # client.js 静态审计（36 项）
 npm run verify    # 以上全套（build + check + lint + typecheck + test + audit；prepublishOnly 同）
 ```
 
@@ -24,13 +24,15 @@ npm run verify    # 以上全套（build + check + lint + typecheck + test + aud
 - `test/parse.test.mjs`（79 用例）：多条拆分、分类标记最左优先且全部剥离、`@文件` 与 `@分类` 判定、文件路径归一化/拒绝绝对与穿越路径、分类派生规则、**优先级标记**（`!high/!medium/!low`、别名与中文、最左优先、`!important` 不误判）、**类型标记**（`^bug/^feature/...`、中文别名、`类型：bug`/`type:bug`、未知值不误判）、工具 `quick_add` 路径。
 - `test/smoke.test.mjs`（174 用例）：创建/校验/完成/重复完成/取消完成/重复取消/改名/删除/筛选/排序（含空值置尾）/stats、时间格式与空值、损坏 JSON 备份重建、结构异常 JSON 归档、重复 id 拆分、记录修复（缺 createdAt、完成早于创建、非法状态、非法 priority/type）、修复提示只投递一次、持久化重载、`resolveDataFile` 优先级、分类校验/归一化/筛选/统计/按分类排序（未分类置尾）、**priority/type 校验/归一化/部分更新**、按优先级排序（未设置置尾）、`files` 校验与派生分类、v1–v4→v5 迁移落盘、不支持版本归档。
 - `test/http.test.mjs`（77 用例）：真实 HTTP 服务上的 prefix 路由、GET health、错误码映射（400/404/405/409）、非法 JSON、数组 body、「HTTP 写入后重新加载可读」，分类/优先级/类型的非法值 400、`sortBy=priority`、只改 priority/type，以及 `/quick-add`（多条 + `#分类` + `@文件` + `!优先级` + `^类型` 标记与表单回退）、`/create` 带 `files`/`priority`/`type`、`/files` 无文件服务时 501；宿主认证（`authorize` 返回 401 → 所有路由 401 + `UNAUTHORIZED` 信封、403 → 403、admission 抛错 → 403、放行 → 正常）。
+- `test/settings.test.mjs`（15 用例）：偏好存储的纯函数与文件语义 —— 默认 `quickEntry: true`、`resolveSettingsFile()` 与数据文件同目录同主名、`normalizeSettings()` 在缺失/非法类型时回落默认且同时接受扁平与信封两种形态、`normalizeSettingsPatch()` 只收已知键且类型必须是布尔、文件不存在时读默认且不写盘、`update()` 落盘为带 `version` / `updatedAt` 的信封且 `read()` 能读回、新实例从磁盘读到同一偏好（跨浏览器语义）、非法补丁不写盘、空补丁是无害 no-op、损坏 JSON 回落默认 + warn 且下一次写入覆盖它、**并发写入串行化且 last-write-wins（30 轮确定性）**、**并发交替读写后磁盘与缓存一致**、写入失败返回 `SETTINGS_WRITE_FAILED`（目标路径被目录占用）、`describe()` 暴露文件路径与最近一次写入错误。
+- `test/http-settings.test.mjs`（9 用例）：真实 HTTP 服务上的偏好路由 —— 偏好文件与数据文件同目录同主名、`GET /settings` 落到 health 的 GET 分支返回 405（偏好只支持 POST）、没有偏好文件时 `POST /settings` 返回默认开、`POST /settings/update` 写 `false` 并落盘到 `todos.settings.json`、非法类型 400 `SETTINGS_INVALID` 且不改磁盘、写回 `true`、未知键被忽略而已知键照常写入、宿主没有设置存储时 501 `SETTINGS_UNAVAILABLE`、设置路由不影响待办路由（`/health` 与 `/create` 仍正常）。
 - `test/transfer.test.mjs`（42 用例）：JSON 信封的导出/回导、CSV 的 BOM/CRLF/逗号与引号转义、`files` 分号分隔、耗时派生列、本地时间解析、中英文表头别名、v1 迁移、裸数组、重复 id 取新、非法行计数与行号、空内容/坏 JSON/版本不支持/缺标题列/未知格式拒绝。
 - `test/store-import.test.mjs`（36 用例）：`dryRun` 不写盘、合并（新者胜/旧者跳过）、仅新增、覆盖全部 + 备份文件、撤销恢复 + 安全备份、`refresh()` 合并另一实例写入、备份名与路径穿越校验、5000 条上限。
 - `test/http-transfer.test.mjs`（35 用例）：`/export` JSON/CSV 内容与元信息、非法格式 400、`/import` dryRun/正式导入/重复导入/CSV/错误码/未知模式回退、`/restore` 回滚与非法文件名 400。
 - `test/store-concurrency.test.mjs`（8 用例）：两个实例交错写同一数据文件时 mtime 合并、同 id 取 `updatedAt` 较新者、`Promise.all` 并发写不损坏不丢、tombstone 防删除复活、陈旧锁清理、锁占用超时后下次写入补齐、写前发现损坏数据不重复归档。
 - `test/ui/panel.test.mjs`（10 用例）：jsdom + 真实 React 18 渲染构建产物 `lib/client.js`；覆盖页头/新建框/四视图分段/筛选计数、表格行与时间格式、固定两行工具栏、空态、错误态与重试恢复、看板切换与两列、甘特四档范围与「现在」标记、**「数据」对话框的打开 / 文件预览 / 策略切换 / 确认导入 / 撤销**、行尾「⋯」删除二次确认 + 撤销、「对话录入并入 composer」的批量模式、导入对话框有文件时遮罩与 `Esc` 不关闭。jsdom 无布局/绘制，视觉回归仍需真机或 Playwright（本轮未接入）。
-- `test/ui/quick.test.mjs`（8 用例）：jsdom 同时挂载 `conversation.composer.dock` 的胶囊与 `conversation.input.overlay` 的清单卡片；覆盖胶囊计数与 `aria-expanded`、点开清单（行 / 已进行时长 / 勾选圈 / 「打开完整面板」）、勾掉完成 + 撤销（`/complete` → 行即时移除、计数回落；撤销走 `/uncomplete` 并刷新）、快速新建（Enter → `/quick-add` → 刷新 + 撤销走 `/delete`）、空态（无计数、给出出口）、错误态与重试、`Esc` 关闭并回焦胶囊、`layout.selectPanel('dsh-todo-time-log')`。
-- `test/client-audit.mjs`（33 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册、**快速入口两槽位 + `ttl-quick-*` 样式 + 复用既有 `/quick-add` `/complete` `/uncomplete` 路由**。当前口径：**310 键/语言、28 个 alias token、278 个 `ttl-` className**。
+- `test/ui/quick.test.mjs`（12 用例）：jsdom 渲染构建产物，同时挂 `conversation.composer.dock` 的胶囊、`conversation.input.overlay` 的清单卡片与 `settings.general.item` 的设置行；覆盖胶囊计数与 `aria-expanded`、点开清单（行 / 已进行时长 / 勾选圈 / 「打开完整面板」）、勾掉完成 + 撤销（`/complete` → 行即时移除、计数回落；撤销走 `/uncomplete` 并刷新）、快速新建（Enter → `/quick-add` → 刷新 + 撤销走 `/delete`）、空态（无计数、给出出口）、错误态与重试、`Esc` 关闭并回焦胶囊、`layout.selectPanel('dsh-todo-time-log')`；**开关**：设置行标题/说明/`role="switch"` + `aria-checked`，关掉写 `/settings/update {quickEntry:false}` 且两个槽位一起卸载（`aria-checked` 回落），重开写回 `true` 并恢复胶囊；偏好为关时首屏不挂载；读取失败 fail-open（按默认开挂载 + 设置行 `role="alert"` 显示原因）；写入失败不翻转开关、胶囊保留并显示保存失败原因。
+- `test/client-audit.mjs`（36 项，`npm run audit`）：i18n zh/en 成对与占位符一致、无死键/未声明键、只 `require('react')`、无 `document`/DOM 查询、无硬编码颜色、类名 `ttl-` 前缀、四视图与各渲染器存在、6×7 日历、模块加载器格式与双槽位注册、**快速入口两槽位 + `ttl-quick-*` 样式 + 复用既有 `/quick-add` `/complete` `/uncomplete` 路由**、**设置行 `settings.general.item` + `ttl-pref-switch` 样式 + 复用 `/settings` `/settings/update` 路由**。当前口径：**314 键/语言、28 个 alias token、285 个 `ttl-` className**。
 - `test/live-utf8.py` / `test/live-projects.py`：对**运行中实例**的真实往返（中文标题、分类筛选、迁移版本落盘、清理测试数据），需设置 `DSH_WEB_URL`（默认 `http://127.0.0.1:52283`）。
 
 **CI（`.github/workflows/ci.yml`）**：push / PR 触发，矩阵 Node 20 / 22 / 24 × Ubuntu / Windows，依次跑 `check`、`lint`、`typecheck`、`build`、`test`、`audit`；Linux 上额外用 `git diff --exit-code -- lib/client.js` 校验构建产物与源码同步，另有 Node 24 覆盖率 job。发布工作流同样先 `npm ci` 再跑 `build` + 测试 + 审计。
@@ -158,6 +160,14 @@ UI 手测清单（十四期：快速入口胶囊 + 清单，**需刷新页面**�
 9. **明暗主题**：切换宿主明暗主题 → 胶囊、卡片、提示条、勾选圈的边框与文字对比度正常，无硬编码颜色。
 10. **窄屏**：窗口拖到 ~560px → 胶囊不挤出、清单宽度不超过视口（`min(420px, 100%)` + `max-width: calc(100vw - 32px)`）、不被 docked composer 裁切。
 11. **静默刷新**：另一个窗口新建一条待办 → 本窗口清单在 60s 内出现该条（打开清单时也会立即刷新一次）；「进行中 X」每 30s 走本地时钟，不发请求。
+
+UI 手测清单（十五期：快速入口开关，**需先重启插件**加载 `/settings` 路由 + **刷新页面**）：
+
+1. **开关行**：DSH「设置 → 通用」里应出现一行「主输入框下方的待办快捷入口」+ 说明 + 右侧开关；默认**开**（`aria-checked="true"`），行的排版与上下其它 General 行对齐（14/20 标题、12/18 说明、0.5px 分隔）。
+2. **关掉**：点开关 → 胶囊与清单立即消失（两个槽位都卸载），`aria-checked` 变 `false`；打开 DevTools Network，60s 内不再有 `/list` 请求；面板、`/todo` 命令、待办数据都正常。
+3. **重开**：再点一次 → 胶囊立即回来、计数与清单内容正确，60s 轮询恢复；刷新页面后状态保持（偏好已落盘 `todos.settings.json`）。
+4. **偏好跨窗口共享**：在窗口 A 关掉开关 → 窗口 B 刷新后同样不显示胶囊（偏好存在 Host 侧，不是 localStorage）；再在 B 打开 → A 刷新后也恢复。
+5. **容错**：把 `todos.settings.json` 改成坏 JSON（或删掉）→ 设置页不崩、按默认开；读取失败（`/settings` 不可用、网络错误）时设置行显示「读取设置失败，暂按默认（开）处理：…」且胶囊照常挂载；写入失败时开关不翻转、胶囊保留，并显示「保存失败，已保持原状态：…」。
 
 ---
 

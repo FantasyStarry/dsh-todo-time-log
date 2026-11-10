@@ -2627,3 +2627,99 @@ export const QUICK_CSS_TEXT = `.ttl-quick-trigger {
 export function QuickStyleSheet() {
   return h('style', { 'data-dsh-todo-time-log': 'quick-styles' }, QUICK_CSS_TEXT);
 }
+
+/**
+ * 「设置 → 通用」开关行的 CSS。
+ *
+ * 排版对齐宿主 General 行（DeveloperToolsRow：行 `padding: 16px 0` + `gap: 24px` +
+ * 0.5px 底分隔；标题 14/20；说明 12/18 + `label-secondary`）；开关按宿主 Switch 的
+ * 观感自绘（36×20 轨道 + 16 圆点），因为客户端产物只允许 `require('react')`，
+ * 拿不到宿主 primitives 的 Switch 组件。
+ */
+export const PREF_CSS_TEXT = `.ttl-pref-row {
+  --ttl-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ttl-dur-fast: 120ms;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+.ttl-pref-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ttl-pref-title {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+.ttl-pref-desc {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+.ttl-pref-error {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.ttl-pref-switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--dsw-alias-border-l4);
+  cursor: pointer;
+  transition: background-color 150ms var(--ttl-ease-out);
+}
+.ttl-pref-switch[data-checked='true'] {
+  background: var(--dsw-alias-state-business-primary);
+}
+.ttl-pref-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ttl-pref-switch:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+.ttl-pref-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-shadow-lv1);
+  transform: translateX(0);
+  transition: transform 150ms var(--ttl-ease-out);
+}
+.ttl-pref-switch[data-checked='true'] .ttl-pref-knob {
+  transform: translateX(16px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ttl-pref-switch,
+  .ttl-pref-switch *,
+  .ttl-pref-knob {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+`;
+
+/** 设置开关行的样式表（设置页打开时挂载）。 */
+export function PrefStyleSheet() {
+  return h('style', { 'data-dsh-todo-time-log': 'pref-styles' }, PREF_CSS_TEXT);
+}

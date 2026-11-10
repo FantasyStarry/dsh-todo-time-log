@@ -4,7 +4,7 @@
 
 ## 一句话
 
-**聊天时不用离开主界面：输入框下方常驻一枚「待办」胶囊，点开就是进行中清单，勾一下即完成（带撤销），也能在清单里直接记一条。**
+**聊天时不用离开主界面：输入框下方常驻一枚「待办」胶囊，点开就是进行中清单，勾一下即完成（带撤销），也能在清单里直接记一条。不想看到它的人可以在「设置 → 通用」里关掉（默认开）。**
 
 ## 为什么要有它
 
@@ -25,8 +25,21 @@
 | --- | --- | --- |
 | trigger | `conversation.composer.dock` | 输入框下方的常驻胶囊（`order: 40`），随会话常驻；agent 执行中 activity 展开时仍然可见 |
 | overlay | `conversation.input.overlay` | 展开的清单卡片，锚在 composer 卡片上沿之上（`position: absolute; bottom: calc(100% + 8px)`），与宿主 `@` 菜单同一套做法，不会被 docked composer 裁切 |
+| setting | `settings.general.item` | 「设置 → 通用」里的开关行（`order: 40`）。它不参与快速入口的渲染，只决定上面两个槽位挂不挂（见下节） |
 
 不放进 `conversation.input.left`：那一行在 activity 展开时会被 `hidden` 掉，正好错过「刚跑完一轮想勾掉」的时刻。
+
+## 开关（设置 → 通用，十五期）
+
+默认**开**。关掉 = **不挂载**，不是「挂载后隐藏」：
+
+- `createQuickEntry()` 返回 `mount()` / `unmount()`，偏好决定调哪个；关闭后**不注册** `conversation.composer.dock` / `conversation.input.overlay`，组件不挂载，因此也**不会拉 `/list`**、60s 轮询不存在；
+- 首屏：`apply()` 里先读一次偏好，读到「关」就根本不挂载（不会先闪一下再消失）；设置里重开时立即挂载，计数与清单照常工作；
+- 开关只覆盖快捷入口本身：面板、`/todo` 命令与待办数据都不受影响（那两个槽位不注册而已）。
+
+偏好存在 Host 侧（`<dataFile>` 同目录同主名的 `todos.settings.json`，信封 `{version:1, updatedAt, settings:{quickEntry}}`），所以同一实例的每个已认证浏览器共享同一个值；不塞进 `todos.json` 的 `version` 信封，因为那是严格契约（旧版插件遇不支持的版本会归档重建），且「写偏好」不该扰动「写待办」。
+
+容错口径：读失败 **fail-open**（按默认开挂载，并在设置行用 `role="alert"` 显示原因）；写失败**不乐观翻转**（开关保持原状态、胶囊保留，显示保存失败原因）；偏好文件损坏时回落默认值并记 warn，下一次写入覆盖它。
 
 ## 状态
 
@@ -35,9 +48,12 @@
  打开 --Esc / × / 再点胶囊--> 关闭（无退出动画）
  打开 --勾选--> 行即时移除 + 卡片内提示「已完成 · 用时 X [撤销]」
  打开 --输入 + Enter--> /quick-add，成功后刷新列表（多条/跳过/错误合并提示）
+
+（偏好=关）--设置里打开--> 挂载两个槽位（默认就是这一步）
+挂载中 --设置里关掉--> 卸载两个槽位：胶囊、清单、60s 轮询一起停（不拉 /list）
 ```
 
-- 数据：`POST /list {filter:'pending', sortBy:'createdAt', direction:'asc'}`；`POST /complete` / `POST /uncomplete` / `POST /quick-add`，与面板同一 Host 实现，不新增接口。
+- 数据：`POST /list {filter:'pending', sortBy:'createdAt', direction:'asc'}`；`POST /complete` / `POST /uncomplete` / `POST /quick-add`，与面板同一 Host 实现，待办侧不新增接口（开关偏好另有 `/settings` 与 `/settings/update` 两条，见上节）。
 - 胶囊计数 = 未完成条数；0 条时候选文案退化为「展开待办清单」，胶囊仍在（还能用它记一条）。
 - 刷新：挂载时拉一次；打开时静默刷新；之后每 60s 静默刷新一次（多窗口 / 面板里改完能跟上）；「进行中 X」每 30s 走一次本地时钟，不发请求。
 - 提示：默认 6s 自动消失；成功类带「撤销」，`role="status"`，错误 `role="alert"`。提示绝对定位在卡片底部，不推动列表。
@@ -59,23 +75,29 @@
 - 卡片：`role="dialog"` + `aria-label`；打开时焦点进新建输入框；`Esc` 关闭并把焦点还给胶囊。
 - 每行勾选圈复用 `CheckButton`（`role="checkbox"`，`aria-label` = 「完成待办：标题」）。
 - 关闭按钮有 `aria-label`；「打开完整面板」是文本按钮。
+- 设置行的开关：`button` + `role="switch"` + `aria-checked`，`aria-label` 就是行标题；读取 / 写入期间 `aria-busy="true"` + `disabled`（防止连点写出两个值）；读取失败与保存失败的说明都是 `role="alert"`。
 
 ## 明确不做
 
 - 不做已完成列表 / 历史（面板有）；不做筛选排序（清单恒为「未完成 + 创建时间升序」）。
 - 不做行内编辑、删除、改分类；不做拖拽。
 - 不监听 document 做「点外部关闭」（客户端产物只允许一处只读 `document.activeElement`，见 `test/client-audit.mjs`）：关闭 = 再点胶囊 / `Esc` / ×。
+- 开关不做「按会话 / 按浏览器」的独立偏好（偏好只有 `quickEntry` 一个键，存在 Host、全实例共享），也不做「临时隐藏」之类的第二套状态。
 
 ## 实现落点
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/client/quick.js` | 模块级 store（数据 + 开关 + 提示）、`QuickTrigger`、`QuickOverlay`、技能注册 `registerQuickEntry` |
-| `src/client/app.js` | 注册 `conversation.composer.dock` 与 `conversation.input.overlay` 两个槽位 |
-| `src/client/styles.js` | `QUICK_CSS_TEXT` + `QuickStyleSheet`（复用面板的勾选圈 / 分类点视觉，只用主题 token） |
-| `src/client/i18n.js` | `quick.*` 文案（zh / en 成对） |
-| `test/ui/quick.test.mjs` | jsdom 真实渲染：计数、展开、勾掉 + 撤销、快速新建、空态 / 错误 / 重试、Esc、打开面板 |
-| `test/client-audit.mjs` | 两个新槽位注册 + 类名前缀 / token / i18n 成对的静态门禁 |
+| `src/client/quick.js` | 模块级 store（数据 + 开关 + 提示）、`QuickTrigger`、`QuickOverlay`、`createQuickEntry()` 返回 `mount` / `unmount` / `isMounted` |
+| `src/client/prefs.js` | 偏好控制器（`load` / `setEnabled`，读失败 fail-open、写失败不翻转）+ 设置行组件 `Row`（`role="switch"`） |
+| `src/client/app.js` | 注册 `settings.general.item` 设置行 + `pref.load()`；实际的两个 composer 槽位由 `mount()` 注册 |
+| `src/client/styles.js` | `QUICK_CSS_TEXT` + `QuickStyleSheet`（快速入口）、`PREF_CSS_TEXT` + `PrefStyleSheet`（设置行与 36×20 开关），只用主题 token |
+| `src/client/i18n.js` | `quick.*` 与 `pref.*`（行标题 / 说明 / 读取失败 / 保存失败）文案，zh / en 成对 |
+| `lib/settings.js` | 偏好文件：`resolveSettingsFile()`、`normalizeSettings()`、`normalizeSettingsPatch()`、`createSettingsStore()`（信封 v1、原子写；读改写整体入队，并发 last-write-wins） |
+| `lib/index.js` | `/settings` 与 `/settings/update` 路由、`apply()` 里接线（`settingsStore` 缺省时 501） |
+| `test/settings.test.mjs` / `test/http-settings.test.mjs` | 偏好存储（含并发 last-write-wins）与两条路由的用例（15 + 9） |
+| `test/ui/quick.test.mjs` | jsdom 渲染：计数、展开、勾掉 + 撤销、快速新建、空态 / 错误 / 重试、Esc、打开面板、**开关卸载 / 恢复 / fail-open**（12 例） |
+| `test/client-audit.mjs` | 快速入口两槽位 + 设置行 + 类名前缀 / token / i18n 成对的静态门禁 |
 
 ## 验收
 

@@ -1,9 +1,13 @@
 /**
- * 快速入口验收 harness：在 jsdom 里真实挂载 lib/client.js 构建产物，同时挂
- * `conversation.composer.dock` 的胶囊与 `conversation.input.overlay` 的清单卡片。
+ * 快速入口 + 偏好开关的 UI 验收 harness：在 jsdom 里真实挂载 lib/client.js 构建产物，
+ * 用一个极小的 slot 运行时把注册的组件渲染出来，因此「设置里关掉开关 → 胶囊卸载」
+ * 走的是真实链路（register → dispose → 组件 unmount），不是测试里手动拆组件。
  *
- * 覆盖：计数 / 展开与关闭 / 勾掉完成 + 撤销 / 快速新建 / 空态 / 错误态与重试 /
- * Esc 关闭 / 「打开完整面板」调用 layout.selectPanel。
+ * 覆盖：
+ * - 胶囊计数 / 展开 / 勾掉 + 撤销 / 快速新建 + 撤销 / 空态 / 错误重试 / Esc / 打开完整面板；
+ * - 设置 → 通用的开关：默认开、关掉后胶囊与清单一起卸载、再打开恢复；
+ * - 偏好为关时首屏不挂载；读取失败 fail-open；写入失败不翻转并给出错误。
+ *
  * 网络层全 mock（globalThis.fetch），不发真实 HTTP。
  *
  * 运行：node --test test/ui/quick.test.mjs
@@ -49,6 +53,13 @@ const TODO_B = {
   completedAt: null,
   updatedAt: new Date(NOW - 90 * 60e3).toISOString(),
 };
+
+/** slot 运行时里要渲染的槽位（main / sidebar 不渲染，避免拉进整个面板）。 */
+const RENDERED_SLOTS = [
+  'conversation.composer.dock',
+  'conversation.input.overlay',
+  'settings.general.item',
+];
 
 let dom = null;
 let savedGlobals = {};
@@ -148,18 +159,28 @@ const failReply = (status, code, message) => ({
   payload: { ok: false, error: { code, message } },
 });
 
-/** 可变数据源：/list 只返回未完成项，与 Host 契约一致。 */
+/** 可变数据源：/list 只返回未完成项；/settings 读写同一份偏好。 */
 function createWorld() {
   const world = {
     todos: [{ ...TODO_A }, { ...TODO_B }],
+    quickEntry: true,
     failList: false,
+    failSettingsRead: false,
+    failSettingsWrite: false,
     calls: [],
-    listCount: 0,
   };
   world.pending = () => world.todos.filter((todo) => todo.status === 'pending');
   world.handler = (action, body) => {
+    if (action === 'settings') {
+      if (world.failSettingsRead) return failReply(500, 'INTERNAL', '设置读取失败');
+      return okReply({ quickEntry: world.quickEntry });
+    }
+    if (action === 'settings/update') {
+      if (world.failSettingsWrite) return failReply(500, 'SETTINGS_WRITE_FAILED', '写入设置失败');
+      if (typeof body.quickEntry === 'boolean') world.quickEntry = body.quickEntry;
+      return okReply({ quickEntry: world.quickEntry });
+    }
     if (action === 'list') {
-      world.listCount += 1;
       if (world.failList) return failReply(500, 'INTERNAL', '数据文件读取失败');
       const todos = world.pending();
       return okReply({
@@ -218,8 +239,16 @@ function installFetch(handler) {
   globalThis.fetch = (input, init = {}) => {
     const href = typeof input === 'string' ? input : String(input && input.url ? input.url : input);
     const pathname = new URL(href, BASE_URL).pathname;
+    // 取路由前缀之后的部分：/settings/update 这类两段路径必须完整保留。
+    const prefix = '/api/dsh-todo-time-log/';
+    const prefixIndex = pathname.indexOf(prefix);
     const segments = pathname.split('/').filter((segment) => segment !== '');
-    const action = segments.length > 0 ? segments[segments.length - 1] : '';
+    const action =
+      prefixIndex >= 0
+        ? pathname.slice(prefixIndex + prefix.length)
+        : segments.length > 0
+          ? segments[segments.length - 1]
+          : '';
     let body = {};
     if (typeof init.body === 'string' && init.body !== '') {
       try {
@@ -248,7 +277,7 @@ function installFetch(handler) {
 }
 //#endregion
 
-//#region 模块加载与渲染
+//#region 模块加载与模拟 slot 运行时
 async function loadClientModule() {
   let captured = null;
   globalThis.window.__ModuleLoader__ = {
@@ -267,41 +296,60 @@ async function loadClientModule() {
   return module;
 }
 
-/** 执行 apply(ctx)，从两个 slot 捕获快速入口组件；layout 服务用 spy 记录面板跳转。 */
-async function captureQuick() {
-  const module = await loadClientModule();
-  const registered = [];
-  const injected = [];
-  const layout = { selected: [], selectPanel(id) {
-    this.selected.push(id);
-  } };
+/**
+ * 极小的 slot 运行时：`inject` 立即执行回调并返回注册器的 disposer，
+ * `register` 收集组件；注册/注销都会通知订阅者，因此「关掉开关 → 组件真的被卸载」
+ * 在 DOM 上一眼可见。
+ */
+function createFakeSlots(layout) {
+  let entries = [];
+  const listeners = new Set();
+  const emit = () => {
+    entries = entries.slice();
+    for (const listener of Array.from(listeners)) listener();
+  };
   const ctx = {
     slots: {
       inject(name, callback) {
-        injected.push(name);
-        callback();
+        const disposer = callback();
+        return () => {
+          if (typeof disposer === 'function') disposer();
+        };
       },
       register(definition, component) {
-        registered.push({ definition, component });
-        return { definition };
+        const entry = { definition, component };
+        entries.push(entry);
+        emit();
+        return () => {
+          const index = entries.indexOf(entry);
+          if (index >= 0) {
+            entries.splice(index, 1);
+            emit();
+          }
+        };
       },
     },
     get(name) {
       return name === 'layout' ? layout : undefined;
     },
   };
-  await module.apply(ctx);
-  const trigger = registered.find((entry) => entry.definition && entry.definition.name === 'conversation.composer.dock');
-  const overlay = registered.find((entry) => entry.definition && entry.definition.name === 'conversation.input.overlay');
-  assert.ok(trigger, 'apply(ctx) 应向 conversation.composer.dock 注册胶囊');
-  assert.ok(overlay, 'apply(ctx) 应向 conversation.input.overlay 注册清单卡片');
-  assert.equal(trigger.definition.id, 'dsh-todo-time-log');
-  assert.equal(overlay.definition.id, 'dsh-todo-time-log');
-  assert.ok(injected.includes('conversation.composer.dock'));
-  assert.ok(injected.includes('conversation.input.overlay'));
-  return { Trigger: trigger.component, Overlay: overlay.component, layout, registered };
+  return {
+    ctx,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot: () => entries,
+    active(name) {
+      return entries.filter((entry) => entry.definition && entry.definition.name === name);
+    },
+  };
 }
+//#endregion
 
+//#region 渲染
 async function settle(rounds = 4) {
   for (let index = 0; index < rounds; index += 1) {
     await act(async () => {
@@ -310,25 +358,52 @@ async function settle(rounds = 4) {
   }
 }
 
-async function mountQuick(world) {
-  const { Trigger, Overlay, layout } = await captureQuick();
+/** 把 slot 运行时里注册的组件画出来（按注册顺序；main / sidebar 跳过）。 */
+function SlotHost(props) {
+  const entries = React.useSyncExternalStore(props.runtime.subscribe, props.runtime.getSnapshot, props.runtime.getSnapshot);
+  return React.createElement(
+    React.Fragment,
+    null,
+    entries.map((entry, index) => {
+      const name = entry.definition && entry.definition.name;
+      if (!RENDERED_SLOTS.includes(name)) return null;
+      const identity = entry.definition.id || entry.definition.key || String(index);
+      return React.createElement(entry.component, { key: `${name}:${identity}` });
+    })
+  );
+}
+
+async function mountApp(world) {
   const fetchMock = installFetch(world.handler);
+  const module = await loadClientModule();
+  const layout = {
+    selected: [],
+    selectPanel(id) {
+      this.selected.push(id);
+    },
+  };
+  const runtime = createFakeSlots(layout);
+  await module.apply(runtime.ctx);
+
   const container = globalThis.document.createElement('div');
   globalThis.document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(
-      React.createElement(React.Fragment, null, React.createElement(Trigger), React.createElement(Overlay))
-    );
+    root.render(React.createElement(SlotHost, { runtime }));
   });
+  // 等 /settings 读取完成、快速入口挂载与 slot 重新渲染。
   await settle();
+
   const api = {
     world,
     layout,
+    runtime,
     container,
     calls: fetchMock.calls,
     trigger: () => container.querySelector('.ttl-quick-trigger'),
     panel: () => container.querySelector('.ttl-quick-panel'),
+    settingsRow: () => container.querySelector('.ttl-pref-row'),
+    settingsSwitch: () => container.querySelector('.ttl-pref-switch'),
     async click(element) {
       assert.ok(element, '【harness】待点击的元素不存在');
       await act(async () => {
@@ -369,8 +444,8 @@ async function mountQuick(world) {
   return api;
 }
 
-async function withQuick(world, run) {
-  const mounted = await mountQuick(world);
+async function withApp(world, run) {
+  const mounted = await mountApp(world);
   try {
     return await run(mounted);
   } finally {
@@ -401,7 +476,7 @@ after(() => {
 });
 
 test('a. 胶囊显示未完成条数，初始不渲染清单卡片', async () => {
-  await withQuick(createWorld(), async ({ trigger }) => {
+  await withApp(createWorld(), async ({ trigger }) => {
     assert.ok(trigger(), '应渲染 .ttl-quick-trigger');
     assert.equal(textOf(trigger()), '待办2');
     assert.equal(trigger().getAttribute('aria-haspopup'), 'dialog');
@@ -412,7 +487,7 @@ test('a. 胶囊显示未完成条数，初始不渲染清单卡片', async () =>
 });
 
 test('b. 点胶囊展开清单：进行中两行、用时、勾选圈与底部入口', async () => {
-  await withQuick(createWorld(), async ({ trigger, panel, click }) => {
+  await withApp(createWorld(), async ({ trigger, panel, click }) => {
     await click(trigger());
     const card = panel();
     assert.ok(card, '点胶囊后应渲染清单卡片');
@@ -436,7 +511,7 @@ test('b. 点胶囊展开清单：进行中两行、用时、勾选圈与底部�
 
 test('c. 勾选完成 + 撤销：调用 /complete、行即时移除、撤销走 /uncomplete 并刷新', async () => {
   const world = createWorld();
-  await withQuick(world, async ({ trigger, panel, click, calls }) => {
+  await withApp(world, async ({ trigger, panel, click, calls }) => {
     await click(trigger());
     const first = rows(panel())[0];
     await click(first.querySelector('.ttl-quick-check'));
@@ -468,7 +543,7 @@ test('c. 勾选完成 + 撤销：调用 /complete、行即时移除、撤销走 
 
 test('d. 快速新建：Enter 提交 /quick-add，成功后刷新列表并带撤销', async () => {
   const world = createWorld();
-  await withQuick(world, async ({ trigger, panel, click, type, submit, calls }) => {
+  await withApp(world, async ({ trigger, panel, click, type, submit, calls }) => {
     await click(trigger());
     const input = panel().querySelector('.ttl-quick-add-input');
     assert.ok(input, '卡片里应有快速新建输入框');
@@ -497,7 +572,7 @@ test('d. 快速新建：Enter 提交 /quick-add，成功后刷新列表并带撤
 test('e. 空态：没有未完成时胶囊不带计数、清单给出出口', async () => {
   const world = createWorld();
   world.todos = [];
-  await withQuick(world, async ({ trigger, panel, click }) => {
+  await withApp(world, async ({ trigger, panel, click }) => {
     assert.equal(textOf(trigger()), '待办');
     assert.equal(trigger().getAttribute('aria-label'), '展开待办清单');
     assert.equal(trigger().querySelector('.ttl-quick-count'), null);
@@ -510,7 +585,7 @@ test('e. 空态：没有未完成时胶囊不带计数、清单给出出口', as
 test('f. 错误态与重试：/list 失败给出错误与重试，重试后恢复列表', async () => {
   const world = createWorld();
   world.failList = true;
-  await withQuick(world, async ({ trigger, panel, click }) => {
+  await withApp(world, async ({ trigger, panel, click }) => {
     await click(trigger());
     const alert = panel().querySelector('.ttl-quick-state[role="alert"]');
     assert.ok(alert, '失败时应渲染错误态');
@@ -524,7 +599,7 @@ test('f. 错误态与重试：/list 失败给出错误与重试，重试后恢�
 });
 
 test('g. Esc 关闭：焦点还给胶囊（aria-expanded 回落）', async () => {
-  await withQuick(createWorld(), async ({ trigger, panel, click, keydown }) => {
+  await withApp(createWorld(), async ({ trigger, panel, click, keydown }) => {
     await click(trigger());
     assert.ok(panel());
     await keydown(panel(), 'Escape');
@@ -534,10 +609,84 @@ test('g. Esc 关闭：焦点还给胶囊（aria-expanded 回落）', async () =>
 });
 
 test('h. 打开完整面板：调用 layout.selectPanel(dsh-todo-time-log) 并关闭卡片', async () => {
-  await withQuick(createWorld(), async ({ trigger, panel, click, layout }) => {
+  await withApp(createWorld(), async ({ trigger, panel, click, layout }) => {
     await click(trigger());
     await click(findButton(panel(), '打开完整面板'));
     assert.deepEqual(layout.selected, ['dsh-todo-time-log']);
     assert.equal(panel(), null);
+  });
+});
+
+test('i. 设置 → 通用开关：默认开，关掉后胶囊与清单一起卸载，再打开恢复', async () => {
+  await withApp(createWorld(), async ({ trigger, panel, settingsRow, settingsSwitch, click, calls, runtime }) => {
+    const row = settingsRow();
+    assert.ok(row, '应渲染设置行 .ttl-pref-row');
+    assert.equal(textOf(row.querySelector('.ttl-pref-title')), '主输入框下方的待办快捷入口');
+    assert.ok(textOf(row.querySelector('.ttl-pref-desc')).includes('待办'));
+
+    const toggle = settingsSwitch();
+    assert.equal(toggle.getAttribute('role'), 'switch');
+    assert.equal(toggle.getAttribute('aria-checked'), 'true');
+    assert.equal(toggle.getAttribute('aria-label'), '主输入框下方的待办快捷入口');
+
+    await click(toggle);
+    assert.ok(
+      calls.some((call) => call.action === 'settings/update' && call.body.quickEntry === false),
+      '关掉应写 /settings/update {quickEntry:false}'
+    );
+    assert.equal(trigger(), null, '关掉后胶囊应消失');
+    assert.equal(panel(), null);
+    assert.equal(runtime.active('conversation.composer.dock').length, 0);
+    assert.equal(runtime.active('conversation.input.overlay').length, 0);
+    assert.equal(settingsSwitch().getAttribute('aria-checked'), 'false');
+
+    await click(settingsSwitch());
+    assert.ok(
+      calls.some((call) => call.action === 'settings/update' && call.body.quickEntry === true),
+      '重新打开应写回 true'
+    );
+    assert.ok(trigger(), '重新打开后胶囊回来');
+    assert.equal(textOf(trigger()), '待办2');
+  });
+});
+
+test('j. 偏好为关时首屏不挂载胶囊，从设置里打开后才出现', async () => {
+  const world = createWorld();
+  world.quickEntry = false;
+  await withApp(world, async ({ trigger, panel, settingsSwitch, click, runtime }) => {
+    assert.equal(trigger(), null, '偏好为关时不应挂载胶囊');
+    assert.equal(panel(), null);
+    assert.equal(runtime.active('conversation.composer.dock').length, 0);
+    assert.equal(settingsSwitch().getAttribute('aria-checked'), 'false');
+
+    await click(settingsSwitch());
+    assert.ok(trigger(), '从设置里打开后胶囊出现');
+    assert.equal(panel(), null);
+  });
+});
+
+test('k. 读取偏好失败：按默认开挂载，设置行给出原因（fail-open）', async () => {
+  const world = createWorld();
+  world.failSettingsRead = true;
+  await withApp(world, async ({ trigger, settingsRow }) => {
+    assert.ok(trigger(), '读取失败时仍按默认开挂载');
+    const alert = settingsRow().querySelector('.ttl-pref-error[role="alert"]');
+    assert.ok(alert, '设置行应显示读取失败原因');
+    assert.ok(textOf(alert).includes('读取设置失败'));
+    assert.ok(textOf(alert).includes('设置读取失败'));
+  });
+});
+
+test('l. 写入偏好失败：开关不翻转、胶囊保留，并显示保存失败原因', async () => {
+  const world = createWorld();
+  world.failSettingsWrite = true;
+  await withApp(world, async ({ trigger, settingsRow, settingsSwitch, click }) => {
+    assert.equal(settingsSwitch().getAttribute('aria-checked'), 'true');
+    await click(settingsSwitch());
+    assert.equal(settingsSwitch().getAttribute('aria-checked'), 'true', '写入失败时保持原值');
+    assert.ok(trigger(), '写入失败时胶囊不应消失');
+    const alert = settingsRow().querySelector('.ttl-pref-error[role="alert"]');
+    assert.ok(alert, '设置行应显示保存失败原因');
+    assert.ok(textOf(alert).includes('保存失败'));
   });
 });
