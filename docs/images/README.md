@@ -6,6 +6,10 @@ jsdom 里挂载、`act()` 里触发交互进入目标状态后，再用无头 Ch
 它用于 README 展示界面结构与状态，**真机外观请在刷新页面后人工确认一次**。
 
 - 生成器：`.tools/preview/`（`render.mjs` + `annotate.js` + `trim.py`，该目录已被 `.gitignore` 忽略，不随仓库提交）；
+  十四期的三张 `quick-entry*.png` 由另一份脚本 `.tools/quick-preview/render-quick.mjs` 生成（只读参考 `render.mjs`，
+  外壳改用宿主**真实**的 composer 类名与 CSS：`GRgSLq_*`（InputBar）+ `A6Bq1a_*`（ContextMeter），从
+  `.refs-ui/dsh-client-ui-conversation/lib/client.js` 里抽出），几何数字用 `.tools/quick-preview/probe.mjs` 在
+  无头 Chrome 里读 `getComputedStyle` / `getBoundingClientRect` 复核；
 - 数据：11 条固定中文演示数据（4 个分类、优先级/类型/文件引用齐全），时间相对生成时刻计算；
 - 截图：无头 Chrome、DSF=2；除 `gantt`（1240 CSS 宽，需完整放下 1120px 时间轴）、
   `narrow`（560 视口，命中组件 `@media (max-width:560px)` 的单列堆叠断点）外，面板均为 940 CSS 宽；
@@ -22,8 +26,18 @@ jsdom 里挂载、`act()` 里触发交互进入目标状态后，再用无头 Ch
 - 操作标注：在渲染页里按 `getBoundingClientRect()` 实时定位 ①②③④ 圆形编号徽章，底部图例条与面板等宽；
 - 为排版清晰，渲染页对少量 CSS 做了覆盖（甘特页放开页面最大宽度、把「进行中」标签移到条尾外侧、看板列宽铺满数据卡片；`demo-quickadd` 在页面里隐藏下方数据卡片以便聚焦对话区），**组件源码未改**；像素级真机外观请以实际页面为准；
 - 单张 PNG 均 ≤500KB。
-- README 正文引用 11 张（banner / hero / board / calendar / gantt / dark / board-swimlanes / 4 张 demo-*）；
-  `chat-quickadd.png`、`complete-toast.png`、`narrow.png` 作为备用图保留在本目录，未放进 README 正文。
+- README 正文引用 14 张（banner / hero / board / calendar / gantt / dark / board-swimlanes / 4 张 demo-* /
+  3 张 quick-entry*）；`chat-quickadd.png`、`complete-toast.png`、`narrow.png` 作为备用图保留在本目录，未放进 README 正文。
+
+**关于 `quick-entry*.png`（十四期 快速入口）**：从下往上是「胶囊 + 上下文占用胶囊」在同一 dock 行、
+composer 卡片、浮在卡片上沿之上的待办清单卡片（间距 8px）。卡片与胶囊来自仓库真实构建产物
+`lib/client.js` 的两个槽位组件；卡片上方的**会话气泡是假对话**（只为说明清单浮在消息之上、不被裁切），
+不是宿主组件；输入框里的 `+` / 模型名 / 模式 / 发送按钮是按宿主类名与几何画的静态占位，
+`32%` 上下文胶囊同理。
+
+- `quick-entry.png`：浅色、916×640 CSS（DSF 2）、清单展开 3 条进行中；
+- `quick-entry-dark.png`：暗色（`body[data-ds-dark-theme]`）、同尺寸同数据，用于核对暗色对比度与卡片边界；
+- `quick-entry-narrow.png`：640×680 CSS，清单宽 420 居中偏左、composer 卡片 608 宽（左右各 16px 留白）不越界。
 
 | 文件 | 像素 | 大小 | 内容 |
 | --- | --- | --- | --- |
@@ -41,5 +55,10 @@ jsdom 里挂载、`act()` 里触发交互进入目标状态后，再用无头 Ch
 | `demo-complete.png` | 1992×2284 | 368.6 KB | 标注示范：① 点行首勾选圈 ② 底部 toast 可撤销、页面不位移 ③ 完成时间与用时自动写入该行 |
 | `demo-quickadd.png` | 1992×1432 | 222.4 KB | 标注示范（聚焦到批量录入卡片）：① 切换工作区 ② 一句话多条 + `#分类 @文件 !优先级 ^类型` ③ 回执气泡可一键撤销；由新建框右侧「批量」进入 |
 | `demo-board.png` | 1872×2445 | 335.5 KB | 标注示范：① 四视图分段 ② 分组/密度/搜索/筛选 ③ 卡片「⋯」含移到分类、优先级、类型、编辑、删除 ④ 已完成列默认 10 条可显示全部 |
+| `quick-entry.png` | 1832×1280 | 150.5 KB | 十四期快速入口（浅色 916×640）：输入框下方「待办 3」胶囊与 `32%` 上下文胶囊同排，卡片上沿之上浮出清单（新建一行 + 3 条进行中 + 打开完整面板 / 勾选即完成） |
+| `quick-entry-dark.png` | 1832×1280 | 151.5 KB | 同上，暗色主题（`body[data-ds-dark-theme]`）：卡片底色 `rgba(48,49,54,.64)` + 磨砂，核对暗色对比度与卡片边界 |
+| `quick-entry-narrow.png` | 1280×1360 | 143.6 KB | 同上，640 CSS 宽：清单 420 宽不越界、composer 卡片 608 宽（左右各 16px 留白） |
 
-如需重新生成：`node .tools/preview/render.mjs`（全部）或 `node .tools/preview/render.mjs hero board`（指定场景）。
+如需重新生成：`node .tools/preview/render.mjs`（全部）或 `node .tools/preview/render.mjs hero board`（指定场景）；
+十四期三张：`node .tools/quick-preview/render-quick.mjs`（全部）或 `node .tools/quick-preview/render-quick.mjs quick-entry-dark`（指定场景），
+量几何用 `node .tools/quick-preview/probe.mjs quick-entry 916 640`。

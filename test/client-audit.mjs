@@ -115,6 +115,21 @@ check('module loader wrapper', /window\.__ModuleLoader__\.load\(\{/.test(src));
 check("factory declares id 'dsh-todo-time-log'", /id:\s*['"]dsh-todo-time-log['"]/.test(src));
 check('registers main slot', /slots\.inject\(\s*['"]main['"]/.test(src));
 check('registers sidebar.panellist slot', /slots\.inject\(\s*['"]sidebar\.panellist['"]/.test(src));
+// 快速入口：胶囊进 composer dock、清单进 composer overlay（主输入框旁的两个新座位）。
+check(
+  'registers conversation.composer.dock slot',
+  /slots\.inject\(\s*['"]conversation\.composer\.dock['"]/.test(src)
+);
+check(
+  'registers conversation.input.overlay slot',
+  /slots\.inject\(\s*['"]conversation\.input\.overlay['"]/.test(src)
+);
+check('quick entry trigger styled', /\.ttl-quick-trigger\s*\{/.test(src));
+check('quick entry panel styled', /\.ttl-quick-panel\s*\{/.test(src));
+check(
+  'quick entry reuses host routes',
+  /\/quick-add/.test(src) && /['"]\/complete['"]/.test(src) && /['"]\/uncomplete['"]/.test(src)
+);
 
 console.log(`\ni18n keys per language: ${zhKeys.length}; alias tokens: ${tokens.length}; class names: ${classNames.length}`);
 if (failures.length > 0) {

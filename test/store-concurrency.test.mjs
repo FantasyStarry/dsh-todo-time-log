@@ -110,7 +110,8 @@ test('Promise.all 并发写入不损坏 JSON 且不丢记录', async (t) => {
   const results = await Promise.all(operations);
   for (const result of results) {
     assert.equal(result.ok, true, result.message);
-    assert.equal(result.persisted, true, result.notices);
+    // 并发下写入偶尔会因锁竞争返回 persisted=false；消息必须是字符串，便于定位是哪些记录。
+    assert.equal(result.persisted, true, JSON.stringify(result.notices ?? []));
   }
 
   const rows = await readTodos(dataFile);

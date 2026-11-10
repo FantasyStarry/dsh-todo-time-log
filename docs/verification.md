@@ -1057,3 +1057,82 @@ requirements {"engines.dsh":">=0.2.0-rc.2 <0.2.2-0"}
 | `npm run verify`（0.6.0） | check / eslint / tsc / build / **342 tests** / audit 28/28 全通过 |
 
 **兼容性影响**：HTTP 契约由「匿名可用」变为「须经宿主认证」。浏览器内的面板请求同源自动携带 cookie，无需改动；脚本直接调接口需先 `GET /?token=<启动 URL 里的 token>` 取 cookie。属安全加固，故版本升 **0.6.0**。
+
+---
+
+## 26. 十四期：主输入框旁的「待办」快速入口（0.7.0）
+
+**背景**：面板是「看全量、做整理」的地方，但真实使用里最高频的动作不是整理，而是「这件事刚做完，顺手勾掉」。为了这个动作切走主视图、找到那一行、勾掉、再切回来，成本远高于动作本身。十四期新增一个**快捷镜像**（设计基线 [`docs/design/quick-entry.md`](./design/quick-entry.md)）：主输入框下方常驻一枚「待办」胶囊，点开就是进行中清单，勾一下即完成（带撤销），也能在清单里直接记一条。
+
+- trigger → `conversation.composer.dock`（`order: 40`，与宿主上下文占用胶囊同一行）；
+- overlay → `conversation.input.overlay`（`position: absolute; bottom: calc(100% + 8px)`，与宿主 `@` 菜单同一套锚定做法，不会被 docked composer 裁切）；
+- 数据只走既有 Host 接口：`/list`、`/complete`、`/uncomplete`、`/quick-add`、`/delete`，**不新增后端**；
+- 编辑 / 删除 / 改分类优先级类型 / 导入导出都留在面板，「打开完整面板」一跳。
+
+### 26.1 验证口径
+
+本节是**独立复核**，不是实现方自测：门禁（`npm run verify`）+ 自己写的断言脚本（不复用 `test/` 下的用例）+ 真实浏览器的几何探针 + 真实渲染出图。
+
+| 层 | 工具 | 产物 |
+| --- | --- | --- |
+| 门禁 | `npm run verify`（check / lint / typecheck / build / test / audit） | 见 26.2 |
+| 独立断言 | `.tools/verify/quick-independent.mjs`（jsdom 里真实挂载 `lib/client.js` 的两个槽位组件，`fetch` 全量 mock） | **53 条** |
+| 视觉 + 几何 | `.tools/quick-preview/render-quick.mjs`（真实组件 + 宿主真实 InputBar / ContextMeter CSS + 主题 token）+ `.tools/quick-preview/probe.mjs`（Chrome 里读 `getComputedStyle` / `getBoundingClientRect`） | 3 张图 + 硬数字 |
+
+### 26.2 结果
+
+| 项 | 证据 | 结论 |
+| --- | --- | --- |
+| 构建与门禁 | `npm run verify` exit 0：`node --check` 7 个 lib 文件、eslint、tsc 通过；build **320,793 B / 8,663 行**；`npm test` **469 passed / 0 failed**；audit **33 项全 PASS**（i18n **310** 键/语言成对无死键、**28** 个 alias token、**278** 个 `ttl-` 类名、新增 `registers conversation.composer.dock slot` / `registers conversation.input.overlay slot` / `quick entry trigger styled` / `quick entry panel styled` / `quick entry reuses host routes`） | PASS |
+| 槽位注册（静态） | 产物里两处 `ctx.slots.register({ name: "conversation.composer.dock" / "conversation.input.overlay", id: PANEL_ID, order: 40 }, QuickTrigger / QuickOverlay)` 都在，且各自包在 `ctx.slots.inject(...)` 里（旧宿主没有该槽时不抛错，只 `console.warn`） | PASS |
+| CSS 口径（静态） | `QUICK_CSS_TEXT` 内 **0** 处 hex / `rgb()`/`hsl()` / 具名色；**30** 个 CSS 变量全部是 `--dsw-*`（27 个主题 token）或本地 `--ttl-*`（3 个时长/缓动变量）；27 个 `--dsw-*` 在宿主 `dsh-client-ui-theme` 里**全部有定义**（没有静默回落到空值）；35 个类名全部 `ttl-quick-` 前缀，与面板 `CSS_TEXT` **零交叉** | PASS |
+| 行为（独立 34 条） | 胶囊计数与 `aria-label`（`3 条进行中，展开待办清单` / 空态 `展开待办清单`）、展开 `role="dialog"` + `aria-modal="false"`、清单按创建时间升序、行内 `role="checkbox"` + `aria-label="完成待办：<标题>"`、勾掉发 `/complete` 且行**即时移除** + 计数同步 + 提示 `已完成 · 用时 3 小时` 带撤销、撤销发 `/uncomplete` 且行回到原位置、`/quick-add` **文本原样透传**（body 只有 `text` 一个字段）且成功后刷新列表 + 撤销逐个 `/delete`、空态、`/list` 500 时 `role="alert"` 错误态 + 原因 + 重试恢复、Esc 关闭并把焦点还给胶囊、`打开完整面板` → `layout.selectPanel('dsh-todo-time-log')` 并关闭卡片、提交中 input `disabled` + 按钮「添加中…」且连按不重复发请求、跳过时**保留草稿**、卸载清掉 6s 提示定时器 | PASS |
+| 两套样式共存 | 同一 `document` 里同时挂载面板 `main` 槽与快速入口：`style[data-dsh-todo-time-log="styles"]` 与 `="quick-styles"` 同时存在；面板样式表里没有任何 `ttl-quick` 规则；胶囊计算值仍是 `display:inline-flex` / `border-radius:999px` / `height:24px` / `font-size:13px` | PASS |
+| 视觉（3 张图） | `docs/images/quick-entry.png` / `quick-entry-dark.png` / `quick-entry-narrow.png`。与输入框关系、留白、圆角阴影、与上下文占用胶囊的关系、暗色对比度逐项看图确认 | PASS（渲染） |
+
+浏览器实测几何（`probe.mjs`，视口 = 场景尺寸）：
+
+| 指标 | 916×640 浅色 | 916×640 暗色 | 640×680 窄屏 |
+| --- | --- | --- | --- |
+| 清单卡片 → composer 卡片上沿间距 | **8px** | 8px | **8px** |
+| 清单卡片左边缘 / composer 卡片左边缘 | 16 / 16（同列对齐） | 同 | 16 / 16 |
+| 清单卡片宽 / 圆角 | 420 / 16px | 420 / 16 | **420**（视口 640，右侧留白 16px 不越界） |
+| 胶囊与上下文占用胶囊间距（同一 dock 行） | **12px** | 12px | 12px |
+| 清单列表是否滚动（3 行） | `scrollHeight 156 == clientHeight 156`，不滚动 | 同 | 同 |
+| 卡片底色 / 磨砂 | `rgba(252,253,254,0.7)` + `blur(40px) saturate(1.5)` | `rgba(48,49,54,0.64)` + 同款磨砂 | 同浅色 |
+
+### 26.3 发现的问题
+
+| 编号 | 严重度 | 现象 | 定位 | 状态 |
+| --- | --- | --- | --- | --- |
+| F1 | 中（视觉） | 清单卡片底下的聊天文字**清晰透出**，底栏（打开完整面板 / 勾选即完成）被背景文字「压住」 | `--dsw-specific-menu` 实为 `--dsw-menu-surface-fill` = `#fcfdfeb3` / `#303136a3`（带 alpha 的菜单材质）；宿主自己的菜单（如 ContextMeter 面板）都会再叠一层 `backdrop-filter: var(--dsw-menu-backdrop-filter)`（`blur(40px) saturate(150%)`），`.ttl-quick-panel` 原先只用了底色没配磨砂 | **已修**（Lead 在 `.ttl-quick-panel` 补 `backdrop-filter`）。复核：探针读到 `backdropFilter: blur(40px) saturate(1.5)`；诊断图（故意让消息文字压在卡片背后）确认背景变为模糊而非可读 |
+| F2 | 无（验证工具） | 第一次出图时 composer 卡片右侧贴到画面边缘、没有 16px 留白 | 无头 Chrome 的 `--window-size=W,H` ≠ 排版视口：实测 `innerWidth = W-16`、`innerHeight = H-95`。外壳按 916 排版但视口只有 900，卡片右边缘被视口切掉 | **已修**（出图脚本开 `W+16 / H+95` 的窗口再裁掉多余边）；修后左右各 16px 对称 |
+| O1 | 提示 | 第三行元信息与底栏分隔线之间 **10px**（列表 `padding-bottom: 4` + 底栏 `padding-top: 6`），三行时观感偏紧 | 设计取值，非缺陷 | 记录，未改 |
+| O2 | 提示 | 视口很矮（<~444px）时卡片按 `max-height: min(60vh, 460px)` 收缩、列表内部滚动（545px 视口实测列表出现 7px 滚动） | 预期行为（`max-height` + `overflow-y: auto`） | 记录，未改 |
+
+### 26.4 盲区与 NOT VERIFIED
+
+- **真机槽位混排**：dock 里还有宿主自己的 occupant（上下文占用胶囊等）与面板的 `sidebar.panellist`，真实顺序/换行/窄屏折行只见外壳模拟，未在真机确认。
+- **真实点击与焦点**：jsdom 能覆盖 `click` / `submit` / `keydown` 与 `document.activeElement`，但真机浏览器里的焦点环、输入法、Esc 冒泡顺序未验证。
+- **与 `@` 菜单的层级**：卡片 `z-index: 120`，宿主菜单面板是 `1100`。推断 `@` 菜单会盖住卡片（合理），但两者同时打开时的观感未验证。
+- **60s 轮询 / 30s 本地时钟**：多窗口或面板里改完后能否跟上，只有单进程 mock 覆盖。
+- **`prefers-reduced-motion`**：只做了静态核对（`animation/transition: none !important` 覆盖 `.ttl-quick-trigger` / `.ttl-quick-panel` 及其后代），未在真机开系统「减少动态效果」确认。
+- **英文界面**：`quick.*` 文案 zh/en 成对由 audit 保证，但英文下窄屏折行未截图。
+- **构建产物加载时机**：与既往各期一致，**页面需刷新（必要时 Ctrl+Shift+R）才会加载新的 `lib/client.js`**。
+
+### 26.5 复现方式
+
+```bash
+npm run verify                                   # 门禁：check / lint / typecheck / build / 469 用例 / audit 33 项
+node .tools/verify/quick-independent.mjs         # 独立断言 53 条（静态 19 + 行为 34）
+node .tools/quick-preview/render-quick.mjs       # 出 3 张图到 docs/images/（诊断图用 diagnostic-behind-text）
+node .tools/quick-preview/probe.mjs quick-entry 916 640       # 量几何（也可 dark / narrow）
+```
+
+> `.tools/` 已被 `.gitignore` 忽略、不随仓库提交；预览外壳用宿主真实的 `GRgSLq_*`（InputBar）与 `A6Bq1a_*`（ContextMeter）类名搭建，卡片与胶囊本身来自仓库真实构建产物；图上方的会话气泡是**假对话**（只为说明卡片浮在消息之上），不是宿主组件。
+
+### 26.6 结论
+
+**PASS（逻辑 / 静态 / 渲染）**：两个槽位注册、四条状态（关闭 / 打开 / 勾掉+撤销 / 新建）与错误态、键盘与焦点归还、两套样式互不污染、明暗与 640 窄屏的几何关系均有独立证据；发现并修复的半透明材质缺陷（F1）已复核。
+
+**真机需刷新页面后人工确认**：槽位与宿主其它 occupant 的混排、真实点击/焦点手感、英文界面折行、以及 `@` 菜单与卡片同时打开时的层级观感。

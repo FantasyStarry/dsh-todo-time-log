@@ -2188,3 +2188,442 @@ export const CSS_TEXT = `.ttl-root {
 export function StyleSheet() {
   return h('style', { 'data-dsh-todo-time-log': 'styles' }, CSS_TEXT);
 }
+
+/**
+ * 快速入口（主输入框下方胶囊 + 上方清单）的 CSS。
+ *
+ * 单独一份而不是塞进 CSS_TEXT：面板未挂载时（用户正在聊天）也要完整可用；
+ * 类名一律 `ttl-quick-*`，不依赖面板的 `.ttl-check` / badge 样式，避免两套样式互相影响。
+ * 圆角同心：卡片 12 = 行 8 + 内边距 4；只用主题 token，明暗主题都成立。
+ */
+export const QUICK_CSS_TEXT = `.ttl-quick-trigger {
+  --ttl-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ttl-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ttl-dur-fast: 120ms;
+  --ttl-dur-base: 180ms;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ttl-dur-fast) var(--ttl-ease-out),
+    color var(--ttl-dur-fast) var(--ttl-ease-out), transform var(--ttl-dur-fast) var(--ttl-ease-out);
+}
+.ttl-quick-trigger:hover,
+.ttl-quick-trigger[data-open='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+.ttl-quick-trigger:active { transform: scale(0.98); }
+.ttl-quick-trigger:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+.ttl-quick-icon { flex: none; }
+.ttl-quick-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ttl-quick-panel {
+  --ttl-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ttl-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ttl-dur-fast: 120ms;
+  --ttl-dur-base: 180ms;
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-width: calc(100vw - 32px);
+  max-height: min(60vh, 460px);
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-specific-menu);
+  /* 菜单底色是半透明的（--dsw-menu-surface-fill 带 alpha），必须像宿主菜单 / 会话待办面板
+     一样加同一层模糊，否则清单背后的聊天文字会透出来。 */
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: var(--dsw-elevation-prominent);
+  animation: ttl-quick-in 160ms var(--ttl-ease-out);
+}
+.ttl-quick-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 8px 6px 4px 12px;
+}
+.ttl-quick-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+.ttl-quick-head-count {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.ttl-quick-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ttl-quick-close:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.ttl-quick-close:focus-visible,
+.ttl-quick-link:focus-visible,
+.ttl-quick-retry:focus-visible,
+.ttl-quick-check:focus-visible,
+.ttl-quick-add-action:focus-visible,
+.ttl-quick-notice-action:focus-visible,
+.ttl-quick-notice-close:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+.ttl-quick-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 8px 8px 12px;
+}
+.ttl-quick-add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: box-shadow var(--ttl-dur-fast) var(--ttl-ease-out);
+}
+.ttl-quick-add-input:focus {
+  box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary);
+}
+.ttl-quick-add-input::placeholder { color: var(--dsw-alias-label-caption); }
+.ttl-quick-add-action {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--ttl-dur-fast) var(--ttl-ease-out),
+    color var(--ttl-dur-fast) var(--ttl-ease-out);
+}
+.ttl-quick-add-action:hover:not(:disabled) {
+  background: var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-primary);
+}
+.ttl-quick-add-action:disabled { opacity: 0.45; cursor: default; }
+.ttl-quick-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 240px;
+  margin: 0;
+  padding: 0 4px 4px;
+  overflow-y: auto;
+  list-style: none;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+}
+
+.ttl-quick-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--dsw-radius-md);
+  transition: background-color var(--ttl-dur-fast) var(--ttl-ease-out);
+  animation: ttl-quick-row-in var(--ttl-dur-base) var(--ttl-ease-out);
+}
+.ttl-quick-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.ttl-quick-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  padding: 0;
+  border: 1.5px solid var(--dsw-alias-border-l4);
+  border-radius: 50%;
+  background: none;
+  color: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.ttl-quick-check:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+.ttl-quick-check:disabled { opacity: 0.45; cursor: default; }
+.ttl-quick-check svg { transform: scale(0.85); }
+.ttl-quick-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ttl-quick-row-title {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ttl-quick-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.ttl-quick-elapsed { flex: none; font-variant-numeric: tabular-nums; }
+.ttl-quick-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.ttl-quick-project-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+.ttl-quick-project[data-tone='business'] .ttl-quick-project-dot { background: var(--dsw-alias-state-business-primary); }
+.ttl-quick-project[data-tone='done'] .ttl-quick-project-dot { background: var(--dsw-alias-state-done-primary); }
+.ttl-quick-project[data-tone='success'] .ttl-quick-project-dot { background: var(--dsw-alias-state-success-primary); }
+.ttl-quick-project[data-tone='warn'] .ttl-quick-project-dot { background: var(--dsw-alias-state-warn-primary); }
+.ttl-quick-project[data-tone='error'] .ttl-quick-project-dot { background: var(--dsw-alias-state-error-primary); }
+.ttl-quick-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ttl-quick-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 12px 10px;
+}
+.ttl-quick-skeleton-row {
+  height: 26px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-skeleton);
+  animation: ttl-quick-breathe 1.4s ease-in-out infinite;
+}
+.ttl-quick-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 4px 12px 12px;
+}
+.ttl-quick-state-title {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 500;
+}
+.ttl-quick-state-hint {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.ttl-quick-retry {
+  margin-top: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ttl-quick-retry:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.ttl-quick-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  padding: 6px 12px 8px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+.ttl-quick-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-state-business-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ttl-quick-link:hover { text-decoration: underline; }
+.ttl-quick-hint {
+  color: var(--dsw-alias-label-caption);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ttl-quick-notice {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 40px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-toast-bg);
+  color: var(--dsw-alias-toast-label);
+  font-size: 12px;
+  line-height: 18px;
+  box-shadow: var(--dsw-shadow-lv3);
+  animation: ttl-quick-notice-in 160ms var(--ttl-ease-out);
+}
+.ttl-quick-notice-icon { flex: none; display: inline-flex; }
+.ttl-quick-notice[data-kind='success'] .ttl-quick-notice-icon { color: var(--dsw-alias-state-success-secondary); }
+.ttl-quick-notice[data-kind='error'] .ttl-quick-notice-icon { color: var(--dsw-alias-state-error-secondary); }
+.ttl-quick-notice-text { min-width: 0; overflow-wrap: anywhere; }
+.ttl-quick-notice-action,
+.ttl-quick-notice-close {
+  flex: none;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-toast-label) 16%, transparent);
+  color: var(--dsw-alias-toast-label);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+}
+.ttl-quick-notice-action { margin-left: auto; }
+.ttl-quick-notice-close {
+  width: 22px;
+  padding: 0;
+  background: none;
+  color: color-mix(in srgb, var(--dsw-alias-toast-label) 70%, transparent);
+  font-size: 13px;
+}
+.ttl-quick-notice-action:hover { background: color-mix(in srgb, var(--dsw-alias-toast-label) 26%, transparent); }
+.ttl-quick-notice-close:hover {
+  background: color-mix(in srgb, var(--dsw-alias-toast-label) 16%, transparent);
+  color: var(--dsw-alias-toast-label);
+}
+
+@keyframes ttl-quick-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ttl-quick-row-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ttl-quick-notice-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ttl-quick-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ttl-quick-trigger,
+  .ttl-quick-trigger *,
+  .ttl-quick-trigger *::before,
+  .ttl-quick-trigger *::after,
+  .ttl-quick-panel,
+  .ttl-quick-panel *,
+  .ttl-quick-panel *::before,
+  .ttl-quick-panel *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+`;
+
+/** 快速入口的样式表：与面板的 StyleSheet 相互独立（互不依赖挂载顺序）。 */
+export function QuickStyleSheet() {
+  return h('style', { 'data-dsh-todo-time-log': 'quick-styles' }, QUICK_CSS_TEXT);
+}

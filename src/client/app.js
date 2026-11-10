@@ -1,5 +1,6 @@
-/** 插件模块对象：main / sidebar 槽位注册与 @ 来源注册。 */
+/** 插件模块对象：main / sidebar / 快速入口槽位注册与 @ 来源注册。 */
 import { createPanel } from './panel.js';
+import { registerQuickEntry } from './quick.js';
 import { createTodoProjectSource, registerTodoProjectSource } from './sources.js';
 import { Icon } from './widgets.js';
 
@@ -31,6 +32,19 @@ export function createModule() {
           Icon
         )
       );
+      // 主输入框旁：dock 里的「待办」胶囊 + composer overlay 里的清单卡片。
+      // 只做「看进行中 / 勾掉 / 记一条」，编辑等完整操作仍在面板；注册失败不影响面板。
+      try {
+        registerQuickEntry(ctx);
+      } catch (error) {
+        try {
+          if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+            console.warn('[dsh-todo-time-log] quick entry setup failed:', error);
+          }
+        } catch (ignored) {
+          // 忽略日志失败
+        }
+      }
       // 主输入框/@ 菜单：注册「待办分类」来源（选中写入 #分类 文本）。
       try {
         registerTodoProjectSource(ctx, createTodoProjectSource(ctx));

@@ -1,6 +1,6 @@
 {
   "name": "dsh-todo-time-log",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "DeepSeek Harness 待办插件：自动记录每条待办的创建与完成时间，四视图（表格 / 看板 / 甘特图 / 日历）呈现真实耗时（Todo time log for DeepSeek Harness）",
   "keywords": [
     "dsh",
@@ -68,8 +68,8 @@
     "check": "node --check lib/time.js && node --check lib/parse.js && node --check lib/files.js && node --check lib/store.js && node --check lib/transfer.js && node --check lib/index.js && node --check lib/client.js",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/store-concurrency.test.mjs",
-    "test:coverage": "node --test --experimental-test-coverage test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/store-concurrency.test.mjs",
+    "test": "node --test test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/ui/quick.test.mjs test/store-concurrency.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage test/parse.test.mjs test/smoke.test.mjs test/http.test.mjs test/transfer.test.mjs test/store-import.test.mjs test/http-transfer.test.mjs test/ui/panel.test.mjs test/ui/quick.test.mjs test/store-concurrency.test.mjs",
     "audit": "node test/client-audit.mjs",
     "verify": "npm run check && npm run lint && npm run typecheck && npm run build && npm test && npm run audit",
     "prepublishOnly": "npm run verify"

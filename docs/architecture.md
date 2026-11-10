@@ -16,8 +16,9 @@ dsh-todo-time-log/
 │   └── en.json             # 显示名与描述（英文）
 ├── src/client/             # ★ Client 半源码（ES 模块，npm run build 用 esbuild 打包）
 │   ├── index.js            # 入口：window.__ModuleLoader__.load({ id, factory })
-│   ├── app.js              # 模块对象：main + sidebar.panellist 槽位注册
+│   ├── app.js              # 模块对象：main + sidebar.panellist + 两个快速入口槽位注册
 │   ├── panel.js            # 面板主体：状态 / 请求 / 交互（不含四个视图实现）
+│   ├── quick.js            # 主输入框旁的快速入口：胶囊（composer.dock）+ 清单卡片（input.overlay）
 │   ├── views/              # table / board / gantt / calendar 四视图
 │   ├── widgets.js          # 小组件 / 图标 / 对话录入等
 │   ├── detail.js           # 详情区
@@ -45,10 +46,12 @@ dsh-todo-time-log/
 │   ├── store-import.test.mjs # 导入合并策略 / 备份 / 撤销 / 数量上限
 │   ├── http-transfer.test.mjs # /export、/import、/restore 端到端
 │   ├── store-concurrency.test.mjs  # 跨进程写入：mtime 合并 + 文件锁（8 用例）
-│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（5 用例）
+│   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（18 用例）
+│   │   ├── panel.test.mjs  # 面板：页头 / 新建框 / 四视图 / 空态 / 错误 / 数据对话框 / 行尾菜单 / 对话录入（10 用例）
+│   │   └── quick.test.mjs  # 快速入口：胶囊计数 / 展开 / 勾掉 + 撤销 / 快速新建 / 空态 / 错误重试 / Esc / 打开面板（8 用例）
 │   ├── live-utf8.py        # 对运行中实例的真实 UTF-8 往返检查（需 DSH_WEB_URL）
 │   ├── live-projects.py    # 对运行中实例的分类/迁移/筛选真实往返检查
-│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图）
+│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图、快速入口两槽位）
 ├── docs/
 │   ├── architecture.md     # 架构与关键代码：目录结构 / 数据模型 / 双调用方入口 / 四视图（本文档）
 │   ├── development.md      # 测试（自动化 + 手工验证清单）与 npm 发布流程
@@ -252,6 +255,10 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
           { name: 'sidebar.panellist', id: 'dsh-todo-time-log', order: 30,
             label: () => '待办时间日志' }, Icon));                         // 侧边栏入口
+        registerQuickEntry(ctx);                                         // 主输入框旁快速入口
+        // 内部再注册两个槽位（见 §3.10）：
+        //   conversation.composer.dock   → 「待办」胶囊（常驻）
+        //   conversation.input.overlay   → 展开的清单卡片（锚在 composer 上沿之上）
       },
     };
   },
@@ -259,6 +266,15 @@ window.__ModuleLoader__.load({
 ```
 
 侧边栏 list 槽的 id 与 `main` keyed 槽的 key 相同，宿主据此把点击事件路由到本面板（与官方 `dsh-context` 插件一致的模式）。面板样式只用 `--dsw-alias-*` 主题 token、类名统一 `ttl-` 前缀，随宿主明暗主题切换。
+
+**快速入口的两处注册**（`registerQuickEntry(ctx)`，两处 `id` 都是 `dsh-todo-time-log`）：
+
+| 槽位 | 组件 | 说明 |
+| --- | --- | --- |
+| `conversation.composer.dock` | `QuickTrigger`（`.ttl-quick-trigger`，`order: 40`） | 输入框下方的常驻「待办」胶囊，显示未完成条数；点击切换清单 |
+| `conversation.input.overlay` | `QuickOverlay`（`.ttl-quick-panel`） | 展开的清单卡片，锚在 composer 卡片上沿之上（`position: absolute; bottom: calc(100% + 8px)`），与宿主 `@` 菜单同一套做法，不会被 docked composer 裁切 |
+
+两个槽位都用 `ctx.slots.inject(...)` 包裹（宿主有该槽位才注入），注册失败只 `console.warn`、不影响面板本体 —— 与「缺服务保持 pending 而不是崩溃」的 Host 半约定一致。细节见 §3.10。
 
 **源码与产物**：上图的单文件模块表是构建产物 `lib/client.js`，源码在 `src/client/`（入口 / 面板 / 四视图 / 小组件 / i18n / 样式等 ES 模块）。`npm run build` 用 esbuild 打包回同一形态（IIFE、`charset=utf8`、不 minify、不打包 react），发布物与加载方式都不变；`lib/client.js` 不要手改。
 
@@ -343,7 +359,7 @@ UI 侧：**分类是可选的选择器，不用手打**——
 
 **工作区如何确定**：`config.workspaceRoot` > 最近活跃 Live Session 的工作目录（按最后事件时间排序，忽略子代理会话）> `workspaceRegistry` > 进程目录。因为「最近活跃会话」可能漂移，**面板标题行有一个工作区选择器**（来自 `POST /workspaces` 的候选，默认选 active，选中后 `/files` 与 `/quick-add` 都带上该 `workspace`，@ 补全缓存也按工作区隔离）。`/files` 与 `/quick-add` 的 `workspace` 只接受候选路径，未知路径返回 400 `WORKSPACE_UNKNOWN`。
 
-**三个可输入的地方**都支持同一套标记：
+**四个可输入的地方**都支持同一套标记：
 
 1. **顶部新建框**（「输入待办内容，按 Enter 创建」）：输入 `测试 #lib` 或 `@lib/store.js 写文档`，按 Enter 后自动拆出分类/文件，**标题里不会残留 `#lib`**；输入时敲 `#`/`@` 会弹出补全下拉。含标记时走 Host 的 `/quick-add`（多条/跳过/错误汇总进浮层提示 toast），不含标记时按当前选择器创建。
 2. **对话录入面板**：同上，另有逐条气泡与撤销。
@@ -354,6 +370,7 @@ UI 侧：**分类是可选的选择器，不用手打**——
    - 命令输入框由 Harness 提供，只支持「命令名补全 + 附件」，**插件无法在那里注入 `#`/`@` 补全**；因此 `/todo` 特意做成「不用补全也好用」：`#分类` 手打即可、**文件直接写工作区相对路径**（`lib/store.js`，不需要 `@`；写法含空格时用 `@"docs/My File.md"`）、多条用换行或 `；` 分隔。
    - 该命令声明了 `input.attachments`，所以在主输入框里**用 `@` 引用/附加的文件**会被接收：插件按文件名在工作区索引里解析成相对路径并记入 `files`。
    - 需要下拉选择/补全时用插件面板（分类选择器 + `#`/`@` 补全）。
+4. **主输入框下方的快速入口胶囊**（聊天时，见 §3.10）：展开清单后一行输入 + Enter，走的也是 `POST /quick-add`，`#分类` / `!优先级` / `^类型` 的解析结果与面板一致；它的输入框是纯文本（没有 `#`/`@` 补全下拉，标记需手打）。
 
 服务端兜底：即使调用方把带标记的文本直接发给 `POST /create`（例如旧版界面或工具调用），Host 也会自动解析拆分，不会把 `#分类`/`@文件`/`!优先级`/`^类型` 记进标题。分类优先级：标题里的显式标记 > 表单选择器 > （都不给时）由文件目录派生；优先级与类型同理：显式标记 > 表单选择器 > 未设置。
 
@@ -397,3 +414,43 @@ UI 侧：**分类是可选的选择器，不用手打**——
 - 无障碍：宿主容器常驻 `aria-live="polite"` + `aria-atomic="false"`，成功/中性节点 `role="status"`，错误节点 `role="alert"`；关闭按钮有 `aria-label`；`prefers-reduced-motion` 下关闭入场动画，且不把焦点移到 toast。
 
 渲染预览见 [`docs/preview/`](./preview/README.md)（真实 `client.js` + 宿主主题 token 的静态渲染）。
+
+### 3.10 快速入口（主输入框旁的「待办」胶囊 + 清单）
+
+设计基线见 [`docs/design/quick-entry.md`](./design/quick-entry.md)。它**不是第二个面板**，只做三件事 —— 看进行中、勾掉（带撤销）、记一条；编辑 / 删除 / 改分类 / 改优先级 / 类型都留在面板。
+
+**为什么不做成第二个面板**：面板占掉整个主视图，而最高频的动作是「这件事刚做完，顺手勾掉」，路径成本全在「切走主视图 → 找到那一行 → 勾掉 → 切回来」。做成第二个常驻面板会连带一套新的筛选/排序/列表实现（与面板重复），而快捷镜像只需要「一个未完成清单 + 一个输入行」。
+
+| 半 | 槽位 | 挂载内容 | 说明 |
+| --- | --- | --- | --- |
+| trigger | `conversation.composer.dock` | `.ttl-quick-trigger` 胶囊（`order: 40`） | 常驻输入框下方；显示未完成条数，点击切换清单；agent 执行中 activity 展开时仍然可见 |
+| overlay | `conversation.input.overlay` | `.ttl-quick-panel` 清单卡片 | 锚在 composer 卡片上沿之上（`position: absolute; bottom: calc(100% + 8px)`），与宿主 `@` 菜单同一套做法，不会被 docked composer 裁切 |
+
+不放进 `conversation.input.left`：那一行在 activity 展开时会被 `hidden` 掉，正好错过「刚跑完一轮想勾掉」的时刻。
+
+**store**（`src/client/quick.js` 的模块级 `createQuickStore(ctx)`，两个槽位组件用 `React.useSyncExternalStore` 订阅同一份快照）：
+
+| 字段 | 作用 |
+| --- | --- |
+| `open` | 清单开关；胶囊与清单共享，点胶囊 / `Esc` / × 都改它 |
+| `status` / `error` | `idle / loading / ready / error` 四态；错误态带「重试」 |
+| `todos` / `pending` | 未完成清单（创建时间升序）与条数；胶囊计数就是 `pending` |
+| `notice` | 卡片内提示 `{id, kind, text, undo}`，默认 6s 自动消失，绝对定位在卡片底部（不推动列表） |
+| `busyId` / `adding` | 单条操作进行中态：防连点，期间勾选圈禁用 |
+
+**数据契约**（不新增接口，全部复用既有 Host 路由）：
+
+| 动作 | 调用 |
+| --- | --- |
+| 读清单 | `POST /list {filter:'pending', sortBy:'createdAt', direction:'asc'}` |
+| 勾掉 | `POST /complete {id}` → 成功即本地移除该行并给「撤销」（`POST /uncomplete {id}` → 静默重拉列表） |
+| 记一条 | `POST /quick-add {text}`（与对话录入同一条解析）→ 成功静默重拉；撤销 = 逐个 `POST /delete {id}` |
+| 打开完整面板 | `ctx.get('layout').selectPanel('dsh-todo-time-log')`（与侧边栏 / `main` 槽同一 id），随后关闭清单 |
+
+**刷新策略**：挂载时拉一次；打开时静默刷新（先渲染缓存再补最新，首帧不空白）；之后每 60s 静默刷新一次（多窗口 / 在面板里改完能跟上）；「进行中 X」每 30s 只走本地时钟，不发请求。静默刷新失败时保留已有列表、不弹错误提示 —— 网络抖动不该把清单清空。
+
+**无障碍**：胶囊是真 `button`，`aria-haspopup="dialog"` + `aria-expanded`，`aria-label` 带条数（`{count} 条进行中，展开待办清单`，空态退化为 `展开待办清单`）；清单 `role="dialog"` + `aria-label`，打开后焦点进新建输入框，`Esc` 关闭并把焦点还回胶囊；每行勾选圈 `role="checkbox"` + `aria-label`「完成待办：标题」；提示成功 / 中性 `role="status"`、错误 `role="alert"`；「打开完整面板」是文本按钮。
+
+**不监听 `document` 做「点外部关闭」**：客户端产物只允许一处只读 `document.activeElement`（`test/client-audit.mjs` 的 `single composer draft reader` / `no direct DOM query` 门禁），关闭路径收敛为「再点胶囊 / `Esc` / ×」三种显式操作，避免 document 级监听在宿主多面板环境里互相打架。
+
+**样式**：`src/client/styles.js` 的 `QUICK_CSS_TEXT` + `QuickStyleSheet` 单独一份，不塞进面板 CSS —— 面板未挂载时（用户正在聊天）快速入口也要完整可用；类名一律 `ttl-quick-*`，不依赖面板的 `.ttl-check` / badge 样式，避免两套 CSS 互相影响；圆角同心（卡片 12 = 行 8 + 内边距 4），只用主题 token。

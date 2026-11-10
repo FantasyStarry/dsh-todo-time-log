@@ -26,7 +26,7 @@
 大多数待办工具回答「还有什么没做」。这个插件还想回答另一个问题：**「这件事花了多久？」**
 
 - 🕒 **时间是一等公民** —— 创建时刻、完成时刻、两者之间的真实耗时全部自动记录；甘特图里一根条，就是一条待办从创建到完成的完整生命周期。
-- ⚡ **随手就能记** —— 面板表单、一句话对话、`/todo` 命令、让智能体直接调用工具，四个入口共用同一套解析规则，结果完全一致。
+- ⚡ **随手就能记** —— 面板表单、一句话对话、`/todo` 命令、让智能体直接调用工具、输入框下方胶囊，五个入口共用同一套解析规则，结果完全一致。
 - 🔒 **数据在你自己的机器上** —— 本地 JSON 文件，不联网、不上传；原子写入 + 跨进程写入保护，文件损坏会自动备份并重建。
 
 ---
@@ -65,7 +65,22 @@
   <sub><b>暗色主题</b>：颜色全部走宿主主题 token，随系统明暗自动切换</sub>
 </p>
 
-> 对话录入与完成反馈的交互过程见下方「操作示范」（静态示意图）。配图由仓库里的真实 `client.js` + 宿主真实主题 token 静态渲染，不是真机截图；生成方式见 [`docs/images/README.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/images/README.md)。
+<p align="center">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/quick-entry.png" alt="快速入口：主输入框下方的「待办」胶囊与展开的清单卡片" width="100%">
+  <br>
+  <sub><b>快速入口</b>：聊天时不用离开主界面 —— 输入框下方常驻「待办」胶囊（数字是未完成条数），点开就是进行中清单；勾一下即完成，一行输入记一条</sub>
+</p>
+
+<p align="center">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/quick-entry-dark.png" alt="快速入口（暗色主题）" width="58%">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/quick-entry-narrow.png" alt="快速入口（窄屏）" width="38%">
+  <br>
+  <sub><b>暗色主题</b>：胶囊与清单的颜色全部走宿主主题 token</sub>
+  &nbsp;&nbsp;&nbsp;
+  <sub><b>窄屏</b>：清单贴住输入框上沿弹出，不被裁切</sub>
+</p>
+
+> 快速入口、对话录入与完成反馈的交互过程见下方「操作示范」（静态示意图）。配图由仓库里的真实 `client.js` + 宿主真实主题 token 静态渲染，不是真机截图；生成方式见 [`docs/images/README.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/images/README.md)。
 
 ---
 
@@ -104,6 +119,15 @@
 3. 卡片「⋯」里可以移到分类、改优先级 / 类型、编辑、删除。
 4. 已完成列默认只显示最近 10 条，可展开查看全部。
 
+### ⑤ 聊天里随手勾掉待办
+
+1. 主输入框下方常驻一枚「待办」胶囊，右侧数字就是未完成条数；点一下，进行中清单在输入框**上方**弹出（只列未完成，按创建时间升序，带已进行时长）。
+2. 点行首勾选圈即完成：这一行立刻消失，卡片底部提示「已完成 · 用时 X」并带「撤销」；点撤销就回到未完成。
+3. 清单里也能直接记一条：一行文字按 Enter 即可，`#分类 !优先级 ^类型` 同样可用；刚记的那条也能「撤销」（等于删掉）。
+4. 这里只做「看进行中 / 勾掉 / 记一条」；编辑、删除、改分类 / 优先级 / 类型仍在面板 —— 点清单底部「打开完整面板」一跳即到。
+
+> 胶囊跟着会话输入框走：新会话首屏（还没有会话）或切到本插件面板时它不出现 —— 那是宿主槽位边界，不是插件没装上（见 [`docs/limitations.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/limitations.md)）。
+
 ---
 
 ## 特性一览
@@ -113,14 +137,15 @@
 | 🕒 创建 / 完成时间 | 全自动记录，本地时间 `YYYY-MM-DD HH:mm:ss`，未完成显示 `-`；表格的完成时间列直接给出「用时 / 进行中」两行，重复完成、重复取消都会给出明确提示 |
 | 🗂 四视图 | 表格 / 看板 / 甘特图 / 日历，同一份数据四种视角；切换视图保留筛选与排序，排序统一走表头 |
 | 🧭 行内操作 | 勾选圈完成、点标题展开详情、行尾「⋯」编辑 / 删除；删除二次确认后仍可用 toast 撤销 |
+| ⚡ 快速入口 | 主输入框下方常驻「待办」胶囊（显示未完成条数），点开是进行中清单：勾一下即完成（卡片内带「撤销」），一行输入 + Enter 直接记一条；只做「看进行中 / 勾掉 / 记一条」，编辑删除仍在面板 |
 | 📊 甘特图 | 纯前端计算（不新增接口）：轨道自适应不再裁切，右侧「用时」列常显（进行中带已进行时长）；条形 = 创建 → 完成 / 现在，分类分组可折叠并聚合；今天 / 近 7 天 / 近 30 天 / 全部四档范围按自然日对齐 |
 | 🏷 分类 · 优先级 · 类型 | 项目分类（可从「已用分类 / 工作区 / 文件夹」建议里选）、高 / 中 / 低优先级、缺陷 / 新功能 / 改进 / 疑问 / 杂项 / 其他 |
 | 📎 `@工作区文件` | 把待办关联到代码文件；只给文件、不给分类时，自动取文件所在目录作为分类 |
-| ✍️ 四种录入 | 面板表单、对话式一句话（`新任务 写周报 #工作`）、`/todo` 斜杠命令、智能体工具 `todo_time_log` |
+| ✍️ 五种录入 | 面板表单、对话式一句话（`新任务 写周报 #工作`）、`/todo` 斜杠命令、智能体工具 `todo_time_log`、主输入框下方胶囊里一行输入 |
 | 🤖 智能体工具 | 智能体可 `list / get / create / complete / uncomplete / update / delete / health`，与 UI 共用同一实现 |
 | 📦 导入 / 导出 | 页头「数据」：JSON 无损备份、CSV 给 Excel 统计；导入先预览再写入，支持合并 / 仅新增 / 覆盖全部，自动备份并可直接撤销 |
 | 🔒 本地数据 | `<DSH_PROFILE_DIR 或 ~/.dsh>/todo-time-log/todos.json`；临时文件 + rename 原子替换、写入串行化、跨进程文件锁 |
-| ✨ 动效 | 列表入场错位、勾选回弹、详情 / 菜单展开、对话框淡入、甘特条「画」出来、筛选计数弹一下；只用 transform / opacity / clip-path，时长 120–200ms |
+| ✨ 动效 | 列表入场错位、勾选回弹、详情 / 菜单展开、对话框淡入、快速入口清单上浮淡入、甘特条「画」出来、筛选计数弹一下；只用 transform / opacity / clip-path，时长 120–200ms |
 | 🌗 主题与无障碍 | 全部颜色走 `--dsw-alias-*` token，明暗主题自适应；`aria-live`、`aria-sort`、键盘操作；`prefers-reduced-motion` 下全部动画与过渡关闭 |
 | ⌨️ 面板快捷键 | `/` 聚焦搜索、`n` 聚焦新建、`f` 循环切换筛选 |
 
@@ -172,7 +197,7 @@ plugin_manager action=install_bundle target=<本地仓库绝对路径>
 
 ## 用法
 
-### 四种录入方式
+### 五种录入方式
 
 | 入口 | 怎么用 | 适合 |
 | --- | --- | --- |
@@ -180,8 +205,11 @@ plugin_manager action=install_bundle target=<本地仓库绝对路径>
 | 对话式录入 | 新建框右侧「批量」，一句话写多条，逐条回执 + 撤销 | 一次记一堆 |
 | `/todo` 命令 | Harness 主输入框：`/todo 写周报 #工作 lib/store.js` | 不离开对话流 |
 | 智能体工具 | 让模型调用 `todo_time_log`（`create` / `complete` / `list` …） | 让 AI 代记、代查 |
+| 快速入口胶囊 | 主输入框下方「待办」胶囊 → 清单里一行输入 + Enter（`#分类 !优先级 ^类型` 可用） | 聊天时顺手记一条 |
 
-### 快捷标记（三处输入通用）
+> 快速入口与面板的分工：它只做「看进行中 / 勾掉 / 记一条」，是面板的**快捷镜像**而不是第二个面板；编辑、删除、改分类 / 优先级 / 类型仍在面板（清单底部「打开完整面板」一跳即到）。清单里一行输入走的是与对话录入同一条 `/quick-add`，标记解析不会出现两套规则；勾掉同样带「撤销」，与面板走同一个 `uncomplete`。
+
+### 快捷标记（各处输入通用）
 
 ```text
 新任务 写周报 #工作 @src/auth/login.ts
@@ -198,7 +226,7 @@ plugin_manager action=install_bundle target=<本地仓库绝对路径>
 | 文件 | `@路径/文件`、`@"docs/My File.md"` | 记为工作区相对路径；没有显式分类时自动取文件所在目录 |
 | 多条 | 换行、`；`、`;` 分隔 | 只有填充词的行会被跳过，不会创建空待办 |
 
-> 解析实现只有一份（`lib/parse.js` 的 `parseQuickAdd()`），面板、`/todo` 命令与工具 `quick_add` 共用，不存在两边规则漂移。
+> 解析实现只有一份（`lib/parse.js` 的 `parseQuickAdd()`），面板（含主输入框下方快速入口胶囊里的那一行）、`/todo` 命令与工具 `quick_add` 共用，不存在两边规则漂移。
 
 ### 智能体工具 / HTTP
 
@@ -251,7 +279,7 @@ HTTP 接口与智能体工具共用同一个业务实现（`executeTodoAction`�
 | Node.js | ≥ 20 |
 | 数据版本 | `version: 5`（旧版本自动迁移） |
 | HTTP 接口 | `POST /api/dsh-todo-time-log/*`（经宿主认证：无登录态 401、跨站/不可信来源 403） |
-| 安装位置 | 中央面板 `main` + 侧边栏 `sidebar.panellist` |
+| 安装位置 | 中央面板 `main` + 侧边栏 `sidebar.panellist` + 主输入框 `conversation.composer.dock`（「待办」胶囊）/ `conversation.input.overlay`（展开的清单） |
 
 > **兼容性门禁**：DSH 在 profile 启动时按已安装版本的 `engines.dsh` 做 preflight，不满足的插件会被禁用，并在 Plugin Manager 里显示 `incompatible-version`。升级 DSH 后若遇到该提示，安装声明范围覆盖新版本的插件版本即可。
 
@@ -260,7 +288,7 @@ HTTP 接口与智能体工具共用同一个业务实现（`executeTodoAction`�
 ```bash
 npm install
 npm run build      # esbuild：src/client/ → lib/client.js
-npm test           # 342 个用例：解析 / 数据层 / HTTP（含宿主认证）/ UI 渲染 / 并发写入
+npm test           # 469 个用例：解析 / 数据层 / HTTP（含宿主认证）/ UI 渲染 / 并发写入
 npm run verify     # check + lint + typecheck + build + test + audit（发布前必跑）
 ```
 
@@ -286,4 +314,4 @@ npm run verify     # check + lint + typecheck + build + test + audit（发布前
 
 ---
 
-**In English** — A todo plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that records and shows each todo's **created and completed time**. Four views (table / board / Gantt / calendar) where every Gantt bar is the real created→completed lifetime; project categories, priority, type, `@workspace-file` references, a `/todo` slash command with natural-language capture, and a `todo_time_log` agent tool. All data stays in a local JSON file.
+**In English** — A todo plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that records and shows each todo's **created and completed time**. Four views (table / board / Gantt / calendar) where every Gantt bar is the real created→completed lifetime; project categories, priority, type, `@workspace-file` references, a `/todo` slash command with natural-language capture, a `todo_time_log` agent tool, and a quick-entry pill under the composer to add or tick off pending todos without leaving the chat. All data stays in a local JSON file.
