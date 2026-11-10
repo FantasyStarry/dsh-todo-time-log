@@ -130,8 +130,9 @@ check(
   'quick entry reuses host routes',
   /\/quick-add/.test(src) && /['"]\/complete['"]/.test(src) && /['"]\/uncomplete['"]/.test(src)
 );
-// 偏好开关：设置 → 通用的一行，读写 Host 侧偏好（与待办数据分开）。
-check('registers settings.general.item slot', /slots\.inject\(\s*['"]settings\.general\.item['"]/.test(src));
+// 偏好开关：长在待办面板页头的「设置」卡里，读写 Host 侧偏好（与待办数据分开）。
+check('panel settings entry wired', /['"]ttl-ghost-button ttl-settings-trigger['"]/.test(src));
+check('settings card styled', /\.ttl-settings\s*\{/.test(src));
 check('preference switch styled', /\.ttl-pref-switch\s*\{/.test(src));
 check(
   'preference uses host settings routes',

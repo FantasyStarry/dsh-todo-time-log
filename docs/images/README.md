@@ -10,9 +10,9 @@ jsdom 里挂载、`act()` 里触发交互进入目标状态后，再用无头 Ch
   外壳改用宿主**真实**的 composer 类名与 CSS：`GRgSLq_*`（InputBar）+ `A6Bq1a_*`（ContextMeter），从
   `.refs-ui/dsh-client-ui-conversation/lib/client.js` 里抽出），几何数字用 `.tools/quick-preview/probe.mjs` 在
   无头 Chrome 里读 `getComputedStyle` / `getBoundingClientRect` 复核；
-  十五期的两张 `settings-quick-entry*.png` 由 `.tools/quick-preview/render-settings.mjs` 生成，外壳用宿主**真实**的设置页
-  CSS（`SettingsRoot` / `GeneralSection` / `DeveloperToolsRow` / `CurrentVersionRow` 四段，从 DSH 安装包的 `app.asar`
-  里用 `.tools/asar.cjs` 抽出到 `.tools/refs-settings/`），几何用 `.tools/quick-preview/probe-settings.mjs` 复核；
+  十五期的两张 `settings-quick-entry*.png`（十六期已按其真实位置重出为「面板 + 页头设置卡」）由
+  `.tools/quick-preview/render-panel-settings.mjs` 生成：jsdom 里真实挂载 `main` 面板、`act()` 里点页头「设置」进入
+  展开态，再把面板 HTML 与它自带的 `<style>` 拼成独立页面截图；几何用 `.tools/quick-preview/probe-settings.mjs` 复核；
 - 数据：11 条固定中文演示数据（4 个分类、优先级/类型/文件引用齐全），时间相对生成时刻计算；
 - 截图：无头 Chrome、DSF=2；除 `gantt`（1240 CSS 宽，需完整放下 1120px 时间轴）、
   `narrow`（560 视口，命中组件 `@media (max-width:560px)` 的单列堆叠断点）外，面板均为 940 CSS 宽；
@@ -43,13 +43,12 @@ composer 卡片、浮在卡片上沿之上的待办清单卡片（间距 8px）�
 - `quick-entry-dark.png`：暗色（`body[data-ds-dark-theme]`）、同尺寸同数据，用于核对暗色对比度与卡片边界；
 - `quick-entry-narrow.png`：640×680 CSS，清单宽 420 居中偏左、composer 卡片 608 宽（左右各 16px 留白）不越界。
 
-**关于 `settings-quick-entry*.png`（十五期 快速入口开关）**：设置对话框（800 宽、左导航 188、内容列 564）的骨架与
-每行排版用的是宿主**真实 CSS**；中间那一行「主输入框下方的待办快捷入口」是仓库真实构建产物里的
-`settings.general.item` 组件（React 在 jsdom 里真实挂载后取出 HTML）；上下相邻行（外观 / 显示代码工作视图 / 当前版本）
-用的是宿主同一套行样式与宿主 locale 文案，但**它们的控件是占位**（36×20 开关、分段控件按宿主 token 画），导航图标也是按分区
-画的同风格占位。为了让画面不被大片留白占满，渲染页把面板高度改成跟随内容（宿主是固定 800×800），**组件源码未改**。
+**关于 `settings-quick-entry*.png`（十六期 开关搬回面板设置卡）**：这两张是**待办面板**本身（仓库真实构建产物的 `main`
+槽，React 在 jsdom 里真实挂载 + 3 条进行中 / 2 条已完成演示数据），页头右侧点「设置」后展开设置卡的状态。
+设置卡（`#ttl-settings-panel`）与「新建待办」卡、「数据」卡同宽同圆角；卡里就是「主输入框下方的待办快捷入口」那一行。
+截图来自面板自身，**不含主输入框下方的「待办」胶囊**（那是宿主 composer 的槽位，和面板不同屏）。
 
-- `settings-quick-entry.png`：开关「开」——蓝色轨道、圆点在右，与上方「显示代码工作视图」的开关右边缘完全对齐；
+- `settings-quick-entry.png`：开关「开」——蓝色轨道、圆点在右；
 - `settings-quick-entry-off.png`：开关「关」——灰色轨道、圆点在左（关掉后主输入框下方的「待办」胶囊不再挂载）。
 
 | 文件 | 像素 | 大小 | 内容 |
@@ -71,11 +70,11 @@ composer 卡片、浮在卡片上沿之上的待办清单卡片（间距 8px）�
 | `quick-entry.png` | 1832×1280 | 150.5 KB | 十四期快速入口（浅色 916×640）：输入框下方「待办 3」胶囊与 `32%` 上下文胶囊同排，卡片上沿之上浮出清单（新建一行 + 3 条进行中 + 打开完整面板 / 勾选即完成） |
 | `quick-entry-dark.png` | 1832×1280 | 151.5 KB | 同上，暗色主题（`body[data-ds-dark-theme]`）：卡片底色 `rgba(48,49,54,.64)` + 磨砂，核对暗色对比度与卡片边界 |
 | `quick-entry-narrow.png` | 1280×1360 | 143.6 KB | 同上，640 CSS 宽：清单 420 宽不越界、composer 卡片 608 宽（左右各 16px 留白） |
-| `settings-quick-entry.png` | 1960×1120 | 122.0 KB | 十五期：设置 → 通用里的「主输入框下方的待办快捷入口」一行，开关为**开**（轨道 36×20、圆点在右，与宿主相邻行开关右对齐） |
-| `settings-quick-entry-off.png` | 1960×1120 | 121.8 KB | 同上，开关为**关**（灰轨道、圆点在左）；关掉后主输入框下方的「待办」胶囊不再挂载 |
+| `settings-quick-entry.png` | 1992×1400 | 238.0 KB | 十六期：待办面板页头右侧「设置」按钮点开后的设置卡（`#ttl-settings-panel`），卡里「主输入框下方的待办快捷入口」开关为**开**（轨道 36×20、圆点在右，右缘距卡右 13px）；卡片与「新建卡」「数据卡」同宽 |
+| `settings-quick-entry-off.png` | 1992×1400 | 237.8 KB | 同上，开关为**关**（灰轨道、圆点在左）；关掉后主输入框下方的「待办」胶囊不再挂载 |
 
 如需重新生成：`node .tools/preview/render.mjs`（全部）或 `node .tools/preview/render.mjs hero board`（指定场景）；
 十四期三张：`node .tools/quick-preview/render-quick.mjs`（全部）或 `node .tools/quick-preview/render-quick.mjs quick-entry-dark`（指定场景），
 量几何用 `node .tools/quick-preview/probe.mjs quick-entry 916 640`；
-十五期两张：`node .tools/quick-preview/render-settings.mjs`，量几何用
-`node .tools/quick-preview/probe-settings.mjs settings-quick-entry 980 560`。
+十六期两张：`node .tools/quick-preview/render-panel-settings.mjs`，量几何用
+`node .tools/quick-preview/probe-settings.mjs settings-quick-entry 996 700`。

@@ -10,6 +10,11 @@ import { renderGanttView } from './views/gantt.js';
 import { createTableView } from './views/table.js';
 import { TransferDialog, makeDownload, readFileText } from './transfer.js';
 import { ChatPanel, CheckButton, ErrorPlaceholder, FileChip, LoadingPlaceholder, ProjectPicker, SuggestionDropdown, TextPlaceholder, ToastIcon } from './widgets.js';
+import { getQuickEntryPreference } from './prefs.js';
+
+/** 没有快速入口控制器时的订阅/快照兜底（保持 useSyncExternalStore 的 hook 顺序不变）。 */
+const EMPTY_SUBSCRIBE = () => () => {};
+const EMPTY_SNAPSHOT = () => null;
 
 export /** 面板主体。所有请求与交互状态都在这里，接口异常不会抛到槽位。 */
 function TodoPanel() {
@@ -54,6 +59,14 @@ function TodoPanel() {
   const [editingType, setEditingType] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState(null);
   const [chatOpen, setChatOpen] = React.useState(false);
+  // 十五期：页头「设置」入口展开的偏好卡（目前只有快速入口开关）。
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const quickPreference = getQuickEntryPreference();
+  const quickPref = React.useSyncExternalStore(
+    quickPreference === null ? EMPTY_SUBSCRIBE : quickPreference.subscribe,
+    quickPreference === null ? EMPTY_SNAPSHOT : quickPreference.getSnapshot,
+    quickPreference === null ? EMPTY_SNAPSHOT : quickPreference.getSnapshot
+  );
   const [chatInput, setChatInput] = React.useState('');
   const [chatBusy, setChatBusy] = React.useState(false);
   const [messages, setMessages] = React.useState(() => [{ id: 0, role: 'assistant', welcome: true }]);
@@ -1350,6 +1363,11 @@ function TodoPanel() {
     const target = event.target;
     const tag = target && typeof target.tagName === 'string' ? target.tagName.toLowerCase() : '';
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || (target && target.isContentEditable === true)) return;
+    if (event.key === 'Escape' && settingsOpen) {
+      event.preventDefault();
+      setSettingsOpen(false);
+      return;
+    }
     if (event.key === '/') {
       event.preventDefault();
       if (searchRef.current && typeof searchRef.current.focus === 'function') searchRef.current.focus();
@@ -1951,7 +1969,7 @@ function TodoPanel() {
       h(
         'div',
         { className: 'ttl-page' },
-        // 页头：标题是唯一的一级信息，右侧只放一个次要入口。
+        // 页头：标题是唯一的一级信息，右侧只放两个次要入口（设置 / 数据）。
         h(
           'header',
           { className: 'ttl-heading' },
@@ -1964,6 +1982,40 @@ function TodoPanel() {
           h(
             'div',
             { className: 'ttl-heading-actions' },
+            quickPreference === null
+              ? null
+              : h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'ttl-ghost-button ttl-settings-trigger',
+                    'aria-controls': 'ttl-settings-panel',
+                    'aria-expanded': settingsOpen ? 'true' : 'false',
+                    title: t('settings.open'),
+                    onClick: () => setSettingsOpen((open) => !open),
+                  },
+                  h(
+                    'svg',
+                    {
+                      className: 'ttl-ghost-button-icon',
+                      width: 12,
+                      height: 12,
+                      viewBox: '0 0 16 16',
+                      fill: 'none',
+                      stroke: 'currentColor',
+                      strokeWidth: 1.4,
+                      strokeLinecap: 'round',
+                      strokeLinejoin: 'round',
+                      'aria-hidden': 'true',
+                      focusable: 'false',
+                    },
+                    h('path', { d: 'M2.5 5h11' }),
+                    h('circle', { cx: 6, cy: 5, r: 1.7 }),
+                    h('path', { d: 'M2.5 11h11' }),
+                    h('circle', { cx: 10, cy: 11, r: 1.7 })
+                  ),
+                  t('settings.open')
+                ),
             h(
               'button',
               {
@@ -1995,6 +2047,72 @@ function TodoPanel() {
             )
           )
         ),
+        // 设置卡：偏好存在 Host（todos.settings.json），这里只做开关与错误反馈。
+        settingsOpen && quickPreference !== null
+          ? h(
+              'section',
+              {
+                className: 'ttl-settings',
+                id: 'ttl-settings-panel',
+                'aria-label': t('settings.title'),
+              },
+              h(
+                'div',
+                { className: 'ttl-settings-head' },
+                h('span', { className: 'ttl-settings-title' }, t('settings.title')),
+                h('span', { className: 'ttl-settings-hint' }, t('settings.hint'))
+              ),
+              h(
+                'div',
+                { className: 'ttl-settings-body' },
+                h(
+                  'div',
+                  { className: 'ttl-pref-row' },
+                  h(
+                    'div',
+                    { className: 'ttl-pref-text' },
+                    h('div', { className: 'ttl-pref-title' }, t('pref.quickTitle')),
+                    h('div', { className: 'ttl-pref-desc' }, t('pref.quickDesc')),
+                    quickPref !== null && quickPref.readError !== ''
+                      ? h(
+                          'div',
+                          { className: 'ttl-pref-error', role: 'alert' },
+                          t('pref.readFailed', { message: quickPref.readError })
+                        )
+                      : null,
+                    quickPref !== null && quickPref.writeError !== ''
+                      ? h(
+                          'div',
+                          { className: 'ttl-pref-error', role: 'alert' },
+                          t('pref.saveFailed', { message: quickPref.writeError })
+                        )
+                      : null
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'ttl-pref-switch',
+                      role: 'switch',
+                      'aria-checked': quickPref !== null && quickPref.enabled ? 'true' : 'false',
+                      'aria-label': t('pref.quickTitle'),
+                      'aria-busy': quickPref !== null && quickPref.busy ? 'true' : 'false',
+                      'data-checked': quickPref !== null && quickPref.enabled ? 'true' : 'false',
+                      disabled:
+                        quickPref === null ||
+                        quickPref.status === 'loading' ||
+                        quickPref.busy,
+                      onClick: () => {
+                        if (quickPreference === null || quickPref === null) return;
+                        void quickPreference.setEnabled(!quickPref.enabled);
+                      },
+                    },
+                    h('span', { className: 'ttl-pref-knob', 'aria-hidden': 'true' })
+                  )
+                )
+              )
+            )
+          : null,
         // 捕获区：单条与批量共用同一位置；批量展开时不在列表上方再叠一层。
         chatOpen
           ? h(ChatPanel, {

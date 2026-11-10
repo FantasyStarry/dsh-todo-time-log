@@ -16,10 +16,10 @@ dsh-todo-time-log/
 │   └── en.json             # 显示名与描述（英文）
 ├── src/client/             # ★ Client 半源码（ES 模块，npm run build 用 esbuild 打包）
 │   ├── index.js            # 入口：window.__ModuleLoader__.load({ id, factory })
-│   ├── app.js              # 模块对象：main / sidebar / 设置行 / 快速入口槽位与偏好接线
-│   ├── panel.js            # 面板主体：状态 / 请求 / 交互（不含四个视图实现）
+│   ├── app.js              # 模块对象：main / sidebar 槽位、快速入口偏好单例与 @ 来源注册
+│   ├── panel.js            # 面板主体：状态 / 请求 / 交互（不含四个视图实现），页头「设置」卡也在这里
 │   ├── quick.js            # 主输入框旁的快速入口：胶囊（composer.dock）+ 清单卡片（input.overlay），可 mount / unmount
-│   ├── prefs.js            # 「设置 → 通用」开关：偏好控制器（读 / 写 / 应用）+ 设置行组件（role=switch）
+│   ├── prefs.js            # 快速入口偏好控制器（读 / 写 / 应用）+ 模块级单例；不含 UI（开关在面板设置卡里）
 │   ├── views/              # table / board / gantt / calendar 四视图
 │   ├── widgets.js          # 小组件 / 图标 / 对话录入等
 │   ├── detail.js           # 详情区
@@ -52,10 +52,10 @@ dsh-todo-time-log/
 │   ├── store-concurrency.test.mjs  # 跨进程写入：mtime 合并 + 文件锁（8 用例）
 │   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（22 用例）
 │   │   ├── panel.test.mjs  # 面板：页头 / 新建框 / 四视图 / 空态 / 错误 / 数据对话框 / 行尾菜单 / 对话录入（10 用例）
-│   │   └── quick.test.mjs  # 快速入口 + 设置行：计数 / 展开 / 勾掉 + 撤销 / 快速新建 / 空态 / 错误 / Esc / 开关卸载与恢复（12 用例）
+│   │   └── quick.test.mjs  # 快速入口 + 面板设置卡：计数 / 展开 / 勾掉 + 撤销 / 快速新建 / 空态 / 错误 / Esc / 开关卸载与恢复（12 用例）
 │   ├── live-utf8.py        # 对运行中实例的真实 UTF-8 往返检查（需 DSH_WEB_URL）
 │   ├── live-projects.py    # 对运行中实例的分类/迁移/筛选真实往返检查
-│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图、快速入口两槽位 + 设置行与偏好路由）
+│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图、快速入口两槽位 + 面板设置入口/设置卡与偏好路由）
 ├── docs/
 │   ├── architecture.md     # 架构与关键代码：目录结构 / 数据模型 / 双调用方入口 / 四视图（本文档）
 │   ├── development.md      # 测试（自动化 + 手工验证清单）与 npm 发布流程
@@ -260,10 +260,8 @@ window.__ModuleLoader__.load({
           { name: 'sidebar.panellist', id: 'dsh-todo-time-log', order: 30,
             label: () => '待办时间日志' }, Icon));                         // 侧边栏入口
         const quickEntry = createQuickEntry(ctx);                        // 快速入口（可 mount / unmount）
-        const pref = createQuickEntryPreference(quickEntry);             // 设置 → 通用 开关
-        ctx.slots.inject('settings.general.item', () => ctx.slots.register(
-          { name: 'settings.general.item', id: 'dsh-todo-time-log', order: 40 },
-          pref.Row));                                                     // 设置行
+        const pref = createQuickEntryPreference(quickEntry);             // 快速入口偏好控制器
+        setQuickEntryPreference(pref);                                   // 放进模块级单例，面板「设置」卡订阅它
         void pref.load();                       // 读偏好：开 → quickEntry.mount()，关 → unmount()
         // createQuickEntry 内部再注册两个槽位（见 §3.10）：
         //   conversation.composer.dock   → 「待办」胶囊（常驻）
@@ -276,15 +274,14 @@ window.__ModuleLoader__.load({
 
 侧边栏 list 槽的 id 与 `main` keyed 槽的 key 相同，宿主据此把点击事件路由到本面板（与官方 `dsh-context` 插件一致的模式）。面板样式只用 `--dsw-alias-*` 主题 token、类名统一 `ttl-` 前缀，随宿主明暗主题切换。
 
-**快速入口与开关的注册**（快速入口两处 `id` 都是 `dsh-todo-time-log`）：
+**快速入口的两处注册**（两处 `id` 都是 `dsh-todo-time-log`）：
 
 | 槽位 | 组件 | 说明 |
 | --- | --- | --- |
 | `conversation.composer.dock` | `QuickTrigger`（`.ttl-quick-trigger`，`order: 40`） | 输入框下方的常驻「待办」胶囊，显示未完成条数；点击切换清单 |
 | `conversation.input.overlay` | `QuickOverlay`（`.ttl-quick-panel`） | 展开的清单卡片，锚在 composer 卡片上沿之上（`position: absolute; bottom: calc(100% + 8px)`），与宿主 `@` 菜单同一套做法，不会被 docked composer 裁切 |
-| `settings.general.item` | `pref.Row`（`.ttl-pref-row`，`order: 40`） | 「设置 → 通用」里的一行：标题「主输入框下方的待办快捷入口」+ 说明 + 右侧开关（`role="switch"`）。关掉 → 卸载前两个槽位（胶囊、清单、60s 轮询一起停），重开 → 重新挂载 |
 
-三个槽位都用 `ctx.slots.inject(...)` 包裹（宿主有该槽位才注入），注册失败只 `console.warn`、不影响面板本体 —— 与「缺服务保持 pending 而不是崩溃」的 Host 半约定一致。快速入口的两个槽位不是直接注册，而是由 `createQuickEntry().mount()` / `unmount()` 按偏好决定挂载（幂等，见 §3.10 的「开关」小节）。
+两个槽位都用 `ctx.slots.inject(...)` 包裹（宿主有该槽位才注入），注册失败只 `console.warn`、不影响面板本体 —— 与「缺服务保持 pending 而不是崩溃」的 Host 半约定一致。两个槽位不是直接注册，而是由 `createQuickEntry().mount()` / `unmount()` 按偏好决定挂载（幂等，见 §3.10 的「设置卡」小节）。**开关的 UI 不再是宿主槽位**（十六期删掉了 `settings.general.item` 注册）：它长在面板自己的页头「设置」卡里，见 §3.10。
 
 **源码与产物**：上图的单文件模块表是构建产物 `lib/client.js`，源码在 `src/client/`（入口 / 面板 / 四视图 / 小组件 / i18n / 样式等 ES 模块）。`npm run build` 用 esbuild 打包回同一形态（IIFE、`charset=utf8`、不 minify、不打包 react），发布物与加载方式都不变；`lib/client.js` 不要手改。
 
@@ -389,7 +386,7 @@ UI 侧：**分类是可选的选择器，不用手打**——
 面板只有三层信息，按「第一眼该看什么」排序：
 
 ```text
-① 页头        标题（20/600）+ 一行本地时间说明   ── 右侧只放一个次要入口「对话录入」
+① 页头        标题（20/600）+ 一行本地时间说明   ── 右侧是「设置」与「数据」两个 ghost 次要入口
 ② 新建待办    输入框 + 分类选择器 + 添加        ── 页面级唯一的主操作（实心按钮）
 ③ 数据卡片    视图分段 · 筛选分段（带计数）     ── 视图控制与列表同属一张卡片
                分类筛选 / 排序 / 方向 · 列表
@@ -399,6 +396,7 @@ UI 侧：**分类是可选的选择器，不用手打**——
 
 - **一张卡片**：工具栏与表格/看板/甘特/日历同属 `.ttl-data`，四视图不再各自叠一层边框；`.ttl-data` 只保留 0.5px 微边框。
 - **唯一主操作**：页面级 `.ttl-button-primary` 只有「添加」一个；其余按钮一律 ghost / outline / 文本链接（对话录入展开后，其卡片内的「发送」也是 primary —— 属于该卡片自己的操作区，不是页面级主操作）。
+- **页头次要入口**：「设置」与「数据」都是 ghost 按钮；「设置」展开的是一张与「对话录入」同形态的卡片（只放偏好开关，不放表单），`Esc` / 再点「设置」收起（见 §3.10 的「设置卡」小节）。
 - **统计并入筛选**：`全部/未完成/已完成` 分段上直接显示计数（`stats.*` 不再单独渲染成一张卡），标签与筛选文案是同一套 key；**分类筛选生效时计数换成该分类的口径**（`/list` 的 `projects[]` 汇总），该分类一条待办都没有时显示 0，不会出现「计数 4、行数 0」。
 - **分段控件**：视图（4 项）与筛选（3 项）用 `.ttl-seg` + `aria-pressed`，选中态是「浅底 + 阴影」而不是和 hover 相同的底色；方向（2 项）收成 28×28 的 ↑/↓ 按钮，不再占一个 select。
 - **状态徽标**：未完成 = 中性浅底深字，已完成 = 成功色浅底深字（`.ttl-badge`，圆角胶囊），分类徽标降级为弱化文本，避免与状态抢注意力。
@@ -465,9 +463,25 @@ UI 侧：**分类是可选的选择器，不用手打**——
 
 **样式**：`src/client/styles.js` 的 `QUICK_CSS_TEXT` + `QuickStyleSheet` 单独一份，不塞进面板 CSS —— 面板未挂载时（用户正在聊天）快速入口也要完整可用；类名一律 `ttl-quick-*`，不依赖面板的 `.ttl-check` / badge 样式，避免两套 CSS 互相影响；圆角同心（卡片 12 = 行 8 + 内边距 4），只用主题 token。
 
-#### 开关（设置 → 通用，十五期）
+#### 设置卡（面板页头 → 「设置」，十六期）
 
-不想看到这枚胶囊的人可以在 DSH 的「设置 → 通用」里关掉它。开关行注册到宿主 `settings.general.item` 槽位（`id: dsh-todo-time-log`、`order: 40`）：标题「主输入框下方的待办快捷入口」+ 说明 + 右侧自绘开关。自绘原因：客户端产物只允许 `require('react')`，拿不到宿主 primitives 的 Switch；排版按宿主 General 行口径（14/20 标题、12/18 说明且取 `label-secondary`、`gap: 24px`、16px 上下留白、0.5px 底分隔），开关 36×20 轨道 + 16px 圆点（`.ttl-pref-switch` / `.ttl-pref-knob`，`role="switch"` + `aria-checked` + `aria-busy`，加载与写入中 `disabled`）。
+不想看到这枚胶囊的人，就在**待办面板自己的页头**关掉它 —— 页头右侧有一个「设置」幽灵按钮（`.ttl-ghost-button ttl-settings-trigger`，`aria-controls="ttl-settings-panel"` + `aria-expanded`），点开在页头下方展开一张设置卡（`<section class="ttl-settings" id="ttl-settings-panel">`，与「对话录入」卡片同一种形态）：
+
+- 卡头：标题「设置」+ 右侧提示「保存在本机，换浏览器也一样」（`settings.title` / `settings.hint`）；
+- 卡体：一行「主输入框下方的待办快捷入口」+ 说明 + 右侧开关（36×20 轨道 + 16px 圆点，`.ttl-pref-switch` / `.ttl-pref-knob`，`role="switch"` + `aria-checked` + `aria-busy`，读取或写入中 `disabled`）；读取失败 / 保存失败的说明是 `role="alert"`；
+- 收起：再点一次页头「设置」，或在面板空白处按 `Esc`（面板根节点 `handlePanelKeyDown` 处理；焦点在输入类控件里时不拦截）—— 依旧不注册 document 级监听。
+
+**为什么不用宿主设置页 / 插件详情页**：用户的原话是「放系统设置太远」—— 为了关掉聊天输入框旁的一枚胶囊，要离开当前会话 → 进设置 → 找到插件那一行。三种位置对比：
+
+| 方案 | 问题 |
+| --- | --- |
+| 宿主「设置 → 通用」一行（`settings.general.item`，十五期） | 离使用现场太远；而且它是宿主槽位，旧版宿主上可能不存在，注册失败只能 warn |
+| 插件详情页配置表单 | 当前构建没有导出 `Config` schema，详情页本来就渲染不出表单（见 [limitations](./limitations.md)） |
+| **面板页头 → 设置卡（现在）** | 与「对话录入」「数据」同一个页头位置、同一套卡片形态；开关和它控制的入口在同一个产品区域里，一眼能对上 |
+
+**样式与生命周期**：设置卡与开关的 CSS 并入面板的 `CSS_TEXT`（`.ttl-settings*` / `.ttl-pref-*`），不再单独一份 `PREF_CSS_TEXT` / `PrefStyleSheet` —— 它只在面板里渲染、跟着面板的生命周期走，因此也自动落在 `.ttl-root` 的 `prefers-reduced-motion` 兜底范围内（150ms 轨道变色 + 圆点 `translateX(16px)`）。
+
+**prefs 单例**：`createQuickEntryPreference()` 在 `apply()` 里建一次，用 `setQuickEntryPreference()` 放进模块级单例；面板用 `getQuickEntryPreference()` 取（不把控制器一层层透传进 `createPanel()`），每次快照变化用 `useSyncExternalStore` 订阅。没有单例时页头不渲染「设置」按钮（例如测试环境只挂了快速入口槽位）。
 
 | 行为 | 实现 |
 | --- | --- |
@@ -504,6 +518,6 @@ UI 侧：**分类是可选的选择器，不用手打**——
 
 **fail-open 与错误展示**（`src/client/prefs.js`）：
 
-- 读失败（网络 / 501 / 坏响应）→ 按默认「开」挂载，设置行下方用 `role="alert"` 显示「读取设置失败，暂按默认（开）处理：…」；
+- 读失败（网络 / 501 / 坏响应）→ 按默认「开」挂载，面板设置卡里用 `role="alert"` 显示「读取设置失败，暂按默认（开）处理：…」；
 - 写失败 → **不乐观翻转**：开关保持原状态、胶囊保持原样，显示「保存失败，已保持原状态：…」，避免出现「开关显示关了但胶囊还在」的两套状态；
 - 偏好存在 Host 侧，所以同一实例的每个已认证浏览器读到同一个值（A 浏览器关掉，B 浏览器刷新后也不显示）。

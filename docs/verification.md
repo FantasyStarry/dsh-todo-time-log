@@ -1210,3 +1210,93 @@ node .tools/quick-preview/probe-settings.mjs settings-quick-entry 980 560   # �
 **PASS（逻辑 / 契约 / 渲染）**：偏好文件的默认值、容错、原子写、并发与两条 HTTP 路由的错误码全部有独立证据；客户端「开/关 → 卸载/恢复」是**真实挂载与卸载**验证的（不是只数注册次数），fail-open 与「写失败不翻转」也都覆盖。发现并修复的并发竞态（F1）已复核；3 条视觉差异（O1–O3）已按宿主 `DeveloperToolsRow` 口径修掉，两张预览图按新样式重出。
 
 **真机需重启插件 + 刷新页面后人工确认**：设置页里这一行的位置与观感、开关手感与焦点环、以及关掉后主输入框下方确实不再出现「待办」胶囊。
+
+---
+
+## 28. 十六期：开关搬回面板的「设置」卡（0.7.0）
+
+**背景**：十五期把快速入口的开关放进了宿主「设置 → 通用」（`settings.general.item`），用户反馈它不在自己该在的地方——这是**本插件**的偏好，却要去系统设置里找。十六期把入口搬回插件自己的界面：**待办面板页头右侧「设置」按钮 → 页头下方展开的设置卡 → 卡里的「主输入框下方的待办快捷入口」开关**。
+
+**只搬入口，不动地基**：Host 偏好层（`lib/settings.js`、`todos.settings.json` 信封、`POST /settings`、`POST /settings/update`、fail-open、写失败不翻转、并发 last-write-wins）**一行没改**；改的是「这个开关画在哪」。
+
+| 层 | 十五期 | 十六期 |
+| --- | --- | --- |
+| 开关位置 | 宿主设置页（`settings.general.item`，order 40） | 待办面板页头「设置」→ `.ttl-settings` 卡 |
+| 客户端注册 | `main` / `sidebar.panellist` / `conversation.composer.dock` / `conversation.input.overlay` / `settings.general.item` | 只有 `main` / `sidebar.panellist` + 偏好开关时的两个快速入口槽位（`settings.general.item` 已删，产物里搜不到该字符串） |
+| 样式 | 独立 `PREF_CSS_TEXT`（`pref-styles`） | 并入面板 `CSS_TEXT`，卡片形态与「对话录入」卡一致（0.5px 边框 + `radius-md` + `bg-layer-1`），reduced-motion 由 `.ttl-root *` 兜底 |
+| `prefs.js` | 控制器 + 设置行组件 `Row` | 只剩控制器 + 单例 `set/getQuickEntryPreference`（面板通过单例订阅快照，不再层层透传） |
+| Host 偏好层 | — | **未变**（同一批路由、同一份文件、同一套并发与容错语义） |
+
+### 28.1 验证口径
+
+独立复核，不复用 `test/` 下的用例：门禁 + Host/HTTP 断言 + 面板 jsdom 断言（假槽位会**真的挂载组件**）+ 真实浏览器几何探针。
+
+| 层 | 工具 | 产物 |
+| --- | --- | --- |
+| 门禁 | `npm run verify` | 见 28.2 |
+| Host + HTTP + 静态 | `.tools/verify/settings-host.mjs` | **28 条** |
+| Client（面板） | `.tools/verify/settings-client.mjs` | **11 条** |
+| 视觉 + 几何 | `.tools/quick-preview/render-panel-settings.mjs` + `probe-settings.mjs` | 2 张图 + 硬数字 |
+
+### 28.2 结果
+
+| 项 | 证据 | 结论 |
+| --- | --- | --- |
+| 构建与门禁 | `npm run verify` exit 0：check **8** 个 lib 文件、eslint、tsc 通过；build **331,480 B / 8,947 行**；`npm test` **497 passed / 0 failed**；audit **37 项全 PASS**（i18n **317** 键/语言、**28** 个 alias token、**291** 个 `ttl-` 类名；新增 `panel settings entry wired` / `settings card styled`，`registers settings.general.item slot` 已移除） | PASS |
+| 宿主槽位已删 | 产物里**搜不到** `settings.general.item`；`apply(ctx)` 只注册 `main` 与 `sidebar.panellist`，并在默认开时把两个快速入口槽位挂上 | PASS |
+| 页头入口 | `.ttl-settings-trigger` 是真 `button`，`aria-controls="ttl-settings-panel"`、`aria-expanded` 随开关翻转；展开时按钮呈「按下」底色（`.ttl-ghost-button[aria-expanded='true']`） | PASS |
+| 设置卡 | 点开渲染 `<section class="ttl-settings" id="ttl-settings-panel">`：标题「设置」+ 右侧提示「保存在本机，换浏览器也一样」+ 一行（行标题 / 行说明 / `role="switch"`）；默认收起 | PASS |
+| 开关语义 | 点开关发 `/settings/update {quickEntry:false}` → dock 与 overlay **两个槽位都归零、胶囊从 DOM 消失**（卡片保持在展开态）；再点写回 `true` 并恢复，恢复后重新拉 `/list` | PASS |
+| 轮询 | 关掉后 60s 轮询的 Timeout 数**回落到基线**；重新打开再起 | PASS |
+| 首屏为关 | 偏好为关时首屏不挂胶囊；从设置卡打开后立即出现 | PASS |
+| 读失败 | fail-open（按开挂载、开关显示开）+ 卡内 `role="alert"`「读取设置失败，暂按默认（开）处理：<原因>」 | PASS |
+| 写失败 | 开关**不翻转**、胶囊保留 + 卡内 `role="alert"`「保存失败，已保持原状态：<原因>」 | PASS |
+| 防连点 | 写入中开关 `disabled` + `aria-busy="true"`，连点两次只发**一个**请求 | PASS |
+| Esc | 在卡片上按 Esc：卡片卸载、`aria-expanded` 回落 `false`；再点仍能打开 | PASS |
+| Host 偏好层（未变） | `todos.settings.json` 默认值/损坏兜底/非法补丁不写盘/空补丁 no-op/原子写无临时文件/写入失败码/**30 轮冷缓存并发 last-write-wins**；真实 HTTP：默认 true、写 false 落盘读回、非法类型 400、未知键忽略、GET 405、无 store 501、不遮蔽 `/health`、偏好写入不动 `todos.json` | PASS |
+| 样式口径 | 设置卡样式在面板 `CSS_TEXT` 内：**0** 处 hex/rgb/具名色，12 个 CSS 变量全是 `--dsw-*`/`--ttl-*`；卡片 0.5px 边框 + `radius-md` + `bg-layer-1`；开关 36×20；`.ttl-root *` 的 `prefers-reduced-motion` 兜底 | PASS |
+
+浏览器实测几何（`probe-settings.mjs`，视口 996×700，内容区 940）：
+
+| 指标 | 实测 |
+| --- | --- |
+| 设置卡与「新建卡」「数据卡」的水平位置 | 三者 **left 57.9 / right 933.1 / width 875.3**，完全同宽对齐 |
+| 设置卡与页头的间距 | **16px**（页头 bottom 100 → 卡片 top 116） |
+| 设置卡 | 高 94.8，圆角 **12px**，0.5px 边框，`bg-layer-1` 底 |
+| 开关 | **36×20**（左侧 884.1 → 右缘 920.1）；右缘距卡片内右沿 **13px**（12 内边距 + 1 边框）；开态圆点左移 18px |
+| 行排版 | `gap: 24px`；行标题 13px/500/行高 20；行说明 12px/18 secondary；卡片提示 12px tertiary |
+| 裁切 | 卡片完全落在 `#root` 内（`cardInsideRoot: true`） |
+
+### 28.3 发现的问题
+
+| 编号 | 严重度 | 现象 | 定位 | 状态 |
+| --- | --- | --- | --- | --- |
+| — | — | 本轮**没有发现缺陷**：11 条面板行为断言、28 条 Host/HTTP/静态断言、2 张图逐项对照均通过 | — | — |
+| O1 | 提示（预览） | 截图是「面板单独渲染」，**看不到主输入框下方的「待办」胶囊**（那是宿主 composer 的槽位，不在面板里）；卡片左侧与右侧内缩差 ~5px 是面板滚动容器的 scrollbar gutter（所有卡片一致，真机同样存在） | 预览取舍 | 记录（`docs/images/README.md` 已注明壳的边界） |
+| O2 | 提示（文案） | 卡片右上提示对普通用户偏技术化（原「偏好保存在 Host，所有浏览器共享」） | `settings.hint` | **已修**（Lead 改成「保存在本机，换浏览器也一样」，「Host」这类实现词不露出给用户） |
+
+> 十五期的 3 条视觉观察（O1 说明色偏淡 / O2 标题行高 / O3 文本与开关留白）在十六期**随样式并入面板自然收敛**：说明改回 `label-secondary`、行 `gap` 改为 24px、标题回到面板的 13/20 口径。
+
+### 28.4 盲区与 NOT VERIFIED
+
+- **真机 GUI**：没有浏览器控制能力，交互全部在 jsdom 里用真实组件 + mock fetch 驱动；真机的展开动画、`focus-visible` 焦点环、触屏/键盘（Space/Enter 切开关）未验证。
+- **宿主 composer 与面板同屏**：`dock` 里的胶囊与面板不是同一个视图，本机无法在同一张真机截图里同时验证「面板里关掉 → 回到聊天，胶囊消失」。
+- **多标签页即时同步**：偏好存 Host 侧，另一个标签页要刷新才看到（设计上不做实时广播）。
+- **设置卡与其它浮层的层级**：面板内还有「数据」对话框等浮层，未见同屏冲突，但未做组合验证。
+- **构建产物加载时机**：Host 半需重启插件、Client 半需刷新页面。
+
+### 28.5 复现方式
+
+```bash
+npm run verify                                          # 门禁：497 用例 / audit 37 项
+node .tools/verify/settings-host.mjs                    # Host 偏好层 + HTTP + 静态 28 条
+node .tools/verify/settings-client.mjs                  # 面板页头设置卡 jsdom 11 条
+node .tools/quick-preview/render-panel-settings.mjs     # 重出 docs/images/settings-quick-entry*.png
+node .tools/quick-preview/probe-settings.mjs settings-quick-entry 996 700   # 量几何
+```
+
+### 28.6 结论
+
+**PASS（逻辑 / 契约 / 渲染）**：入口从宿主设置页搬回面板后，开关的读、写、fail-open、写失败不翻转、防连点、Esc 收起、首屏未挂与恢复都仍是**真实挂载/卸载**验证过的；Host 偏好层一行未动且重跑一遍仍全绿；设置卡与面板其它卡片同宽、同圆角、同边框，36×20 开关右对齐。本轮无新增缺陷。
+
+**真机需重启插件 + 刷新页面后人工确认**：面板页头「设置」按钮的位置与展开动画、开关手感与焦点环、以及关掉后回到聊天界面时主输入框下方的「待办」胶囊确实不再出现。

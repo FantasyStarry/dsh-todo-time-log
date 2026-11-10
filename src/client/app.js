@@ -1,6 +1,6 @@
-/** 插件模块对象：main / sidebar / 快速入口槽位注册、偏好开关与 @ 来源注册。 */
+/** 插件模块对象：main / sidebar 槽位注册、快速入口偏好与 @ 来源注册。 */
 import { createPanel } from './panel.js';
-import { createQuickEntryPreference } from './prefs.js';
+import { createQuickEntryPreference, setQuickEntryPreference } from './prefs.js';
 import { createQuickEntry } from './quick.js';
 import { createTodoProjectSource, registerTodoProjectSource } from './sources.js';
 import { Icon } from './widgets.js';
@@ -46,25 +46,12 @@ export function createModule() {
       );
       // 主输入框旁：dock 里的「待办」胶囊 + composer overlay 里的清单卡片。
       // 只做「看进行中 / 勾掉 / 记一条」，编辑等完整操作仍在面板。
-      // 默认开；「设置 → 通用」里的开关关掉后两个槽位一起卸载（偏好存在 Host）。
+      // 默认开；面板页头「设置」里的开关关掉后两个槽位一起卸载（偏好存在 Host）。
+      // 偏好控制器放在面板可见的模块级单例里，面板的「设置」卡直接订阅它。
       try {
         const quickEntry = createQuickEntry(ctx);
         const quickPreference = createQuickEntryPreference(quickEntry);
-        // 设置行单独 try：旧宿主没有这个槽位时也要继续读偏好并挂载快速入口。
-        try {
-          ctx.slots.inject('settings.general.item', () =>
-            ctx.slots.register(
-              {
-                name: 'settings.general.item',
-                id: 'dsh-todo-time-log',
-                order: 40,
-              },
-              quickPreference.Row
-            )
-          );
-        } catch (error) {
-          warn('settings.general.item', error);
-        }
+        setQuickEntryPreference(quickPreference);
         void quickPreference.load();
       } catch (error) {
         warn('quick entry', error);

@@ -467,7 +467,7 @@ function QuickNotice(props) {
 /**
  * 快速入口：胶囊进 composer dock、清单进 composer overlay。
  *
- * 不在 apply 时直接挂载，而是返回 `mount` / `unmount`：偏好开关（设置 → 通用）
+ * 不在 apply 时直接挂载，而是返回 `mount` / `unmount`：偏好开关（待办面板页头「设置」卡）
  * 决定要不要挂；开关关闭时两个槽位一起卸载，胶囊、清单与 60s 轮询全部停止。
  * 两个槽位在旧宿主上可能不存在，注册失败只 warn，不影响面板本体。
  *

@@ -81,9 +81,12 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/settings-quick-entry.png" alt="设置 → 通用里的快速入口开关" width="100%">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/settings-quick-entry.png" alt="待办面板页头「设置」里的快速入口开关（开）" width="49%">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/settings-quick-entry-off.png" alt="把同一个开关关掉后的状态" width="49%">
   <br>
-  <sub><b>开关</b>：不想在输入框下方看到这枚胶囊，可以在「设置 → 通用」里关掉；关掉后胶囊与清单一起消失，面板与 <code>/todo</code> 命令不受影响</sub>
+  <sub><b>开关（默认开）</b>：不想在输入框下方看到这枚胶囊，就在<strong>待办面板页头 → 设置</strong>里关掉</sub>
+  &nbsp;&nbsp;&nbsp;
+  <sub><b>关掉</b>：胶囊与清单一起消失，面板与 <code>/todo</code> 命令不受影响</sub>
 </p>
 
 > 快速入口、对话录入与完成反馈的交互过程见下方「操作示范」（静态示意图）。配图由仓库里的真实 `client.js` + 宿主真实主题 token 静态渲染，不是真机截图；生成方式见 [`docs/images/README.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/images/README.md)。
@@ -143,7 +146,7 @@
 | 🕒 创建 / 完成时间 | 全自动记录，本地时间 `YYYY-MM-DD HH:mm:ss`，未完成显示 `-`；表格的完成时间列直接给出「用时 / 进行中」两行，重复完成、重复取消都会给出明确提示 |
 | 🗂 四视图 | 表格 / 看板 / 甘特图 / 日历，同一份数据四种视角；切换视图保留筛选与排序，排序统一走表头 |
 | 🧭 行内操作 | 勾选圈完成、点标题展开详情、行尾「⋯」编辑 / 删除；删除二次确认后仍可用 toast 撤销 |
-| ⚡ 快速入口 | 主输入框下方常驻「待办」胶囊（显示未完成条数），点开是进行中清单：勾一下即完成（卡片内带「撤销」），一行输入 + Enter 直接记一条；只做「看进行中 / 勾掉 / 记一条」，编辑删除仍在面板。**默认开，可在「设置 → 通用」里关掉**（关掉后胶囊、清单与 60s 轮询一起停，面板与 `/todo` 不受影响） |
+| ⚡ 快速入口 | 主输入框下方常驻「待办」胶囊（显示未完成条数），点开是进行中清单：勾一下即完成（卡片内带「撤销」），一行输入 + Enter 直接记一条；只做「看进行中 / 勾掉 / 记一条」，编辑删除仍在面板。**默认开，可在待办面板页头「设置」里关掉**（关掉后胶囊、清单与 60s 轮询一起停，面板与 `/todo` 不受影响） |
 | 📊 甘特图 | 纯前端计算（不新增接口）：轨道自适应不再裁切，右侧「用时」列常显（进行中带已进行时长）；条形 = 创建 → 完成 / 现在，分类分组可折叠并聚合；今天 / 近 7 天 / 近 30 天 / 全部四档范围按自然日对齐 |
 | 🏷 分类 · 优先级 · 类型 | 项目分类（可从「已用分类 / 工作区 / 文件夹」建议里选）、高 / 中 / 低优先级、缺陷 / 新功能 / 改进 / 疑问 / 杂项 / 其他 |
 | 📎 `@工作区文件` | 把待办关联到代码文件；只给文件、不给分类时，自动取文件所在目录作为分类 |
@@ -215,7 +218,7 @@ plugin_manager action=install_bundle target=<本地仓库绝对路径>
 
 > 快速入口与面板的分工：它只做「看进行中 / 勾掉 / 记一条」，是面板的**快捷镜像**而不是第二个面板；编辑、删除、改分类 / 优先级 / 类型仍在面板（清单底部「打开完整面板」一跳即到）。清单里一行输入走的是与对话录入同一条 `/quick-add`，标记解析不会出现两套规则；勾掉同样带「撤销」，与面板走同一个 `uncomplete`。
 >
-> 不用它也不影响别的：开关在 **设置 → 通用**（标题「主输入框下方的待办快捷入口」），**默认开**；关掉后胶囊、清单与 60s 轮询一起停，重新打开立即恢复，面板 / `/todo` 命令 / 待办数据都不受影响。偏好存在 Host 侧的 `<数据文件同目录>/todos.settings.json`，所以同一实例的浏览器共享同一个开关状态（A 浏览器关掉，B 浏览器刷新后也不显示）。
+> 不用它也不影响别的：开关就在待办面板里 —— 打开面板，点页头右侧的「设置」，卡片里的「主输入框下方的待办快捷入口」开关**默认开**；关掉后胶囊、清单与 60s 轮询一起停，重新打开立即恢复，面板 / `/todo` 命令 / 待办数据都不受影响。偏好存在 Host 侧的 `<数据文件同目录>/todos.settings.json`，所以同一实例的浏览器共享同一个开关状态（A 浏览器关掉，B 浏览器刷新后也不显示）。
 
 ### 快捷标记（各处输入通用）
 
@@ -287,7 +290,7 @@ HTTP 接口与智能体工具共用同一个业务实现（`executeTodoAction`�
 | Node.js | ≥ 20 |
 | 数据版本 | `version: 5`（旧版本自动迁移） |
 | HTTP 接口 | `POST /api/dsh-todo-time-log/*`（经宿主认证：无登录态 401、跨站/不可信来源 403） |
-| 安装位置 | 中央面板 `main` + 侧边栏 `sidebar.panellist` + 主输入框 `conversation.composer.dock`（「待办」胶囊）/ `conversation.input.overlay`（展开的清单）+ 设置 → 通用 `settings.general.item`（快速入口开关） |
+| 安装位置 | 中央面板 `main` + 侧边栏 `sidebar.panellist` + 主输入框 `conversation.composer.dock`（「待办」胶囊）/ `conversation.input.overlay`（展开的清单）；快速入口开关在面板页头「设置」卡里，不占宿主槽位 |
 
 > **兼容性门禁**：DSH 在 profile 启动时按已安装版本的 `engines.dsh` 做 preflight，不满足的插件会被禁用，并在 Plugin Manager 里显示 `incompatible-version`。升级 DSH 后若遇到该提示，安装声明范围覆盖新版本的插件版本即可。
 
@@ -322,4 +325,4 @@ npm run verify     # check + lint + typecheck + build + test + audit（发布前
 
 ---
 
-**In English** — A todo plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that records and shows each todo's **created and completed time**. Four views (table / board / Gantt / calendar) where every Gantt bar is the real created→completed lifetime; project categories, priority, type, `@workspace-file` references, a `/todo` slash command with natural-language capture, a `todo_time_log` agent tool, and a quick-entry pill under the composer to add or tick off pending todos without leaving the chat (it can be turned off in Settings → General; the preference lives on the Host and is shared by every browser). All data stays in a local JSON file.
+**In English** — A todo plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that records and shows each todo's **created and completed time**. Four views (table / board / Gantt / calendar) where every Gantt bar is the real created→completed lifetime; project categories, priority, type, `@workspace-file` references, a `/todo` slash command with natural-language capture, a `todo_time_log` agent tool, and a quick-entry pill under the composer to add or tick off pending todos without leaving the chat (it can be switched off from the Preferences card in the panel header; the preference lives on the Host and is shared by every browser). All data stays in a local JSON file.

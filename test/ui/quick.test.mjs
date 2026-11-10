@@ -54,12 +54,8 @@ const TODO_B = {
   updatedAt: new Date(NOW - 90 * 60e3).toISOString(),
 };
 
-/** slot 运行时里要渲染的槽位（main / sidebar 不渲染，避免拉进整个面板）。 */
-const RENDERED_SLOTS = [
-  'conversation.composer.dock',
-  'conversation.input.overlay',
-  'settings.general.item',
-];
+/** slot 运行时里要渲染的槽位：整个面板（设置卡在页头）+ 两个快速入口槽位。 */
+const RENDERED_SLOTS = ['main', 'conversation.composer.dock', 'conversation.input.overlay'];
 
 let dom = null;
 let savedGlobals = {};
@@ -402,7 +398,8 @@ async function mountApp(world) {
     calls: fetchMock.calls,
     trigger: () => container.querySelector('.ttl-quick-trigger'),
     panel: () => container.querySelector('.ttl-quick-panel'),
-    settingsRow: () => container.querySelector('.ttl-pref-row'),
+    settingsTrigger: () => container.querySelector('.ttl-settings-trigger'),
+    settingsCard: () => container.querySelector('#ttl-settings-panel'),
     settingsSwitch: () => container.querySelector('.ttl-pref-switch'),
     async click(element) {
       assert.ok(element, '【harness】待点击的元素不存在');
@@ -617,12 +614,19 @@ test('h. 打开完整面板：调用 layout.selectPanel(dsh-todo-time-log) 并�
   });
 });
 
-test('i. 设置 → 通用开关：默认开，关掉后胶囊与清单一起卸载，再打开恢复', async () => {
-  await withApp(createWorld(), async ({ trigger, panel, settingsRow, settingsSwitch, click, calls, runtime }) => {
-    const row = settingsRow();
-    assert.ok(row, '应渲染设置行 .ttl-pref-row');
-    assert.equal(textOf(row.querySelector('.ttl-pref-title')), '主输入框下方的待办快捷入口');
-    assert.ok(textOf(row.querySelector('.ttl-pref-desc')).includes('待办'));
+test('i. 面板页头「设置」：默认收起，点开是设置卡；关掉后胶囊与清单一起卸载，再打开恢复', async () => {
+  await withApp(createWorld(), async ({ trigger, panel, settingsTrigger, settingsCard, settingsSwitch, click, calls, runtime }) => {
+    const openButton = settingsTrigger();
+    assert.ok(openButton, '页头应有「设置」入口');
+    assert.equal(openButton.getAttribute('aria-expanded'), 'false');
+    assert.equal(settingsCard(), null, '默认收起');
+
+    await click(openButton);
+    assert.ok(settingsCard(), '点开后出现设置卡');
+    assert.equal(openButton.getAttribute('aria-expanded'), 'true');
+    assert.equal(textOf(settingsCard().querySelector('.ttl-settings-title')), '设置');
+    assert.ok(textOf(settingsCard().querySelector('.ttl-settings-hint')).includes('本机'));
+    assert.equal(textOf(settingsCard().querySelector('.ttl-pref-title')), '主输入框下方的待办快捷入口');
 
     const toggle = settingsSwitch();
     assert.equal(toggle.getAttribute('role'), 'switch');
@@ -650,43 +654,46 @@ test('i. 设置 → 通用开关：默认开，关掉后胶囊与清单一起卸
   });
 });
 
-test('j. 偏好为关时首屏不挂载胶囊，从设置里打开后才出现', async () => {
+test('j. 偏好为关时首屏不挂载胶囊，从面板设置里打开后才出现', async () => {
   const world = createWorld();
   world.quickEntry = false;
-  await withApp(world, async ({ trigger, panel, settingsSwitch, click, runtime }) => {
+  await withApp(world, async ({ trigger, panel, settingsTrigger, settingsSwitch, click, runtime }) => {
     assert.equal(trigger(), null, '偏好为关时不应挂载胶囊');
     assert.equal(panel(), null);
     assert.equal(runtime.active('conversation.composer.dock').length, 0);
-    assert.equal(settingsSwitch().getAttribute('aria-checked'), 'false');
 
+    await click(settingsTrigger());
+    assert.equal(settingsSwitch().getAttribute('aria-checked'), 'false');
     await click(settingsSwitch());
-    assert.ok(trigger(), '从设置里打开后胶囊出现');
+    assert.ok(trigger(), '从面板设置里打开后胶囊出现');
     assert.equal(panel(), null);
   });
 });
 
-test('k. 读取偏好失败：按默认开挂载，设置行给出原因（fail-open）', async () => {
+test('k. 读取偏好失败：按默认开挂载，设置卡里给出原因（fail-open）', async () => {
   const world = createWorld();
   world.failSettingsRead = true;
-  await withApp(world, async ({ trigger, settingsRow }) => {
+  await withApp(world, async ({ trigger, settingsTrigger, settingsCard, click }) => {
     assert.ok(trigger(), '读取失败时仍按默认开挂载');
-    const alert = settingsRow().querySelector('.ttl-pref-error[role="alert"]');
-    assert.ok(alert, '设置行应显示读取失败原因');
+    await click(settingsTrigger());
+    const alert = settingsCard().querySelector('.ttl-pref-error[role="alert"]');
+    assert.ok(alert, '设置卡应显示读取失败原因');
     assert.ok(textOf(alert).includes('读取设置失败'));
     assert.ok(textOf(alert).includes('设置读取失败'));
   });
 });
 
-test('l. 写入偏好失败：开关不翻转、胶囊保留，并显示保存失败原因', async () => {
+test('l. 写入偏好失败：开关不翻转、胶囊保留，并在设置卡里显示保存失败原因', async () => {
   const world = createWorld();
   world.failSettingsWrite = true;
-  await withApp(world, async ({ trigger, settingsRow, settingsSwitch, click }) => {
+  await withApp(world, async ({ trigger, settingsTrigger, settingsCard, settingsSwitch, click }) => {
+    await click(settingsTrigger());
     assert.equal(settingsSwitch().getAttribute('aria-checked'), 'true');
     await click(settingsSwitch());
     assert.equal(settingsSwitch().getAttribute('aria-checked'), 'true', '写入失败时保持原值');
     assert.ok(trigger(), '写入失败时胶囊不应消失');
-    const alert = settingsRow().querySelector('.ttl-pref-error[role="alert"]');
-    assert.ok(alert, '设置行应显示保存失败原因');
+    const alert = settingsCard().querySelector('.ttl-pref-error[role="alert"]');
+    assert.ok(alert, '设置卡应显示保存失败原因');
     assert.ok(textOf(alert).includes('保存失败'));
   });
 });
