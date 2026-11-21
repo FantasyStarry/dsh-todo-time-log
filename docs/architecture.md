@@ -20,7 +20,7 @@ dsh-todo-time-log/
 │   ├── panel.js            # 面板主体：状态 / 请求 / 交互（不含四个视图实现），页头「设置」卡也在这里
 │   ├── quick.js            # 主输入框旁的快速入口：胶囊（composer.dock）+ 清单卡片（input.overlay），可 mount / unmount
 │   ├── prefs.js            # 快速入口偏好控制器（读 / 写 / 应用）+ 模块级单例；不含 UI（开关在面板设置卡里）
-│   ├── views/              # table / board / gantt / calendar 四视图
+│   ├── views/              # table / board / gantt / calendar / insights 五视图
 │   ├── widgets.js          # 小组件 / 图标 / 对话录入等
 │   ├── detail.js           # 详情区
 │   ├── helpers.js          # 时间 / 格式化 / 甘特几何等纯函数
@@ -46,24 +46,25 @@ dsh-todo-time-log/
 │   ├── http.test.mjs       # 真实 HTTP 路由端到端（77 用例，含宿主认证 401/403）
 │   ├── settings.test.mjs   # Client 偏好存储：路径 / 归一化 / 信封落盘 / 损坏回落 / 并发 last-write-wins（15 用例）
 │   ├── http-settings.test.mjs # /settings 与 /settings/update 端到端：默认值 / 400 / 501（9 用例）
-│   ├── transfer.test.mjs   # 导出 / 导入格式：JSON v1–v5、CSV 转义、别名、非法行
+│   ├── transfer.test.mjs   # 导出 / 导入格式：JSON v1–v6、CSV 转义、别名、非法行
 │   ├── store-import.test.mjs # 导入合并策略 / 备份 / 撤销 / 数量上限
 │   ├── http-transfer.test.mjs # /export、/import、/restore 端到端
 │   ├── store-concurrency.test.mjs  # 跨进程写入：mtime 合并 + 文件锁（8 用例）
 │   ├── ui/                 # jsdom + 真实 React 渲染 lib/client.js 的验收 harness（22 用例）
-│   │   ├── panel.test.mjs  # 面板：页头 / 新建框 / 四视图 / 空态 / 错误 / 数据对话框 / 行尾菜单 / 对话录入（10 用例）
+│   │   ├── panel.test.mjs  # 面板：页头 / 新建框 / 五视图 / 空态 / 错误 / 数据对话框 / 行尾菜单 / 搁置 / 预计用时 / 回顾（14 用例）
 │   │   └── quick.test.mjs  # 快速入口 + 面板设置卡：计数 / 展开 / 勾掉 + 撤销 / 快速新建 / 空态 / 错误 / Esc / 开关卸载与恢复（12 用例）
 │   ├── live-utf8.py        # 对运行中实例的真实 UTF-8 往返检查（需 DSH_WEB_URL）
 │   ├── live-projects.py    # 对运行中实例的分类/迁移/筛选真实往返检查
-│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、四视图、快速入口两槽位 + 面板设置入口/设置卡与偏好路由）
+│   └── client-audit.mjs    # client.js 静态审计（i18n 成对/死键、require、token、五视图、快速入口两槽位 + 面板设置入口/设置卡与偏好路由）
 ├── docs/
-│   ├── architecture.md     # 架构与关键代码：目录结构 / 数据模型 / 双调用方入口 / 四视图（本文档）
+│   ├── architecture.md     # 架构与关键代码：目录结构 / 数据模型 / 双调用方入口 / 五视图（本文档）
 │   ├── development.md      # 测试（自动化 + 手工验证清单）与 npm 发布流程
 │   ├── limitations.md      # 已知限制与 TODO（12 条，含不确定处与适配层）
 │   ├── verification-log.md # 本机验证记录（按阶段累积的自验证据表）
 │   ├── verification.md     # 独立验证报告（另一个 agent 产出，含 PASS/FAIL/盲区）
 │   ├── publishing.md       # npm 发布流程：bootstrap / Trusted Publisher / 版本策略 / 排错
 │   ├── images/             # README 落地页配图（banner / hero / 四视图 / 操作示范）+ 生成说明见其 README
+│   ├── design/round17-archive-estimate-insights.md  # 十七期契约：搁置 / 预计用时 / 回顾（v6）
 │   ├── research/           # 看板设计调研 + 现状审计（六期改版的依据）
 │   │   ├── kanban-design-research.md   # 15 个可借鉴模式 + 差距 + P0/P1/P2 + 反模式（带来源）
 │   │   └── kanban-current-state.md     # 代码/数据/门禁现状、风险 R1–R12、快速改进点 Q1–Q8
@@ -97,6 +98,8 @@ dsh-todo-time-log/
   "status": "pending",
   "createdAt": "2026-11-03T00:37:49.000Z",
   "completedAt": null,
+  "archivedAt": null,
+  "estimateMinutes": 45,
   "updatedAt": "2026-11-03T00:37:49.000Z"
 }
 ```
@@ -112,19 +115,21 @@ dsh-todo-time-log/
 | `status` | `'pending' \| 'completed'` | 必填 | 未完成 / 已完成；非法值按 `pending` 兜底 |
 | `createdAt` | ISO-8601 UTC string | 必填 | 创建时自动写入；缺失/非法按「当前时间」补齐并提示 |
 | `completedAt` | ISO-8601 UTC string \| null | 完成时必填 | **未完成时恒为 `null`**（UI 显示 `-`）；完成时间早于创建时间时修正为创建时间 |
+| `archivedAt` | ISO-8601 UTC string \| null | 默认 `null` | 搁置时刻。非 null ⇒ 必为 `pending` 且 `completedAt === null`（否则载入时清空并提示）；搁置项不进 `filter:'all'`、不进完成统计、不出现在四个时间视图里，只在 `filter:'archived'` 的表格里出现 |
+| `estimateMinutes` | number \| null | 默认 `null`，整数 1–1440 | 预计用时（分钟）。`null` = 未填，**任何界面都不得把它显示成 0**；非法值载入时清为 `null` 并提示 |
 | `updatedAt` | ISO-8601 UTC string | 必填 | 任何修改（改名/完成/取消完成）刷新 |
 
 ### 2.2 磁盘信封
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "updatedAt": "2026-11-03T00:37:56.011Z",
   "todos": [ /* Todo[] */ ]
 }
 ```
 
-版本迁移：`version: 1`（无 `project`）、`version: 2`（无 `files`）、`version: 3`（无 `priority`）、`version: 4`（无 `type`）都会自动迁移为内存中的 v5 记录，各自给出一次提示，下一次写入即落盘为 v5；不支持的版本号（例如 99）不会被猜测，而是归档备份后重建空列表。**注意**：v5 文件对旧版插件属于「不支持版本」（旧版会归档重建），升级前确认没有旧 Host 与本插件并存。
+版本迁移：`version: 1`（无 `project`）、`version: 2`（无 `files`）、`version: 3`（无 `priority`）、`version: 4`（无 `type`）、`version: 5`（无 `archivedAt` / `estimateMinutes`）都会自动迁移为内存中的 v6 记录，各自给出一次提示，下一次写入即落盘为 v6；不支持的版本号（例如 99）不会被猜测，而是归档备份后重建空列表。**注意**：v6 文件对旧版插件属于「不支持版本」（旧版会归档重建），升级前确认没有旧 Host 与本插件并存。
 
 写入策略：**临时文件 + rename 原子替换**（Windows 下 rename 失败时回退为覆盖写），全部写操作串行化在一条 Promise 链上，保证落盘顺序与内存顺序一致。读取时逐条用 `normalizeTodo()` 校验修复；JSON 损坏备份为 `todos.json.corrupt-json-<ts>`、结构异常备份为 `.corrupt-shape-<ts>`、版本不支持备份为 `.corrupt-version-<n>-<ts>`，然后重建空列表。
 
@@ -134,8 +139,8 @@ dsh-todo-time-log/
 
 | 层 | 实现 | 说明 |
 | --- | --- | --- |
-| 格式 | `lib/transfer.js`（纯函数） | JSON 信封（与磁盘同版本 + `exportedAt` / `exporter` 元信息）、CSV（BOM + CRLF + 本地时间）、从 JSON v1–v5 / 裸 `Todo[]` / CSV 解析为规范化记录 |
-| 导出 | `POST /export` → `store.refresh()` → `store.list({filter:'all'})` → `exportTodoData()` | 先合并其他实例刚写入的数据，避免导出陈旧快照；JSON 与 CSV 都走同一函数 |
+| 格式 | `lib/transfer.js`（纯函数） | JSON 信封（与磁盘同版本 + `exportedAt` / `exporter` 元信息）、CSV（BOM + CRLF + 本地时间）、从 JSON v1–v6 / 裸 `Todo[]` / CSV 解析为规范化记录 |
+| 导出 | `POST /export` → `store.snapshot()` → `exportTodoData()` | 先合并其他实例刚写入的数据，避免导出陈旧快照；**必须用 `snapshot()` 而不是 `list({filter:'all'})`** —— 后者刻意隐藏搁置项，用它导出会静默丢掉整份搁置清单；JSON 与 CSV 都走同一函数 |
 | 预览 | `POST /import { dryRun: true }` | 在写锁外先 `refresh()`，按所选策略计算 plan（新增/更新/跳过/移除），不写盘、不改内存 |
 | 导入 | `POST /import` → 写锁内 `mergeIfDiskChanged` → `planImport` → 备份 → 一次性写盘 | `merge`（同 id `updatedAt` 新者胜）/ `add`（已存在即跳过）/ `replace`（整体替换） |
 | 撤销 | `POST /restore { file }` | 只接受同目录 `<dataFile>.bak-*` 基名；恢复前再备份当前状态，因此撤销本身也可回退 |
@@ -149,11 +154,17 @@ dsh-todo-time-log/
 
 ```text
 (新建) --create--> pending --complete--> completed
-                     ^                        |
+                     ^    |                  |
+                     |    +-- archive --> archived
+                     |    |                  |
+                     |    +<-- unarchive ----+
+                     |                       |
                      +------ uncomplete ------+   （清空 completedAt，并提示）
+
+archived --complete--> completed     （自动清空 archivedAt，提示「已从搁置清单完成」）
 ```
 
-重复操作（对已完成再 complete / 对未完成再 uncomplete）**不写盘**，返回结构化错误码 `ALREADY_COMPLETED` / `ALREADY_PENDING` 与中文说明。
+重复操作（对已完成再 complete / 对未完成再 uncomplete / 对已搁置再 archive / 对未搁置 unarchive）**不写盘**，返回结构化错误码 `ALREADY_COMPLETED` / `ALREADY_PENDING` / `ALREADY_ARCHIVED` / `NOT_ARCHIVED` 与中文说明；对已完成项 `archive` 返回 `ARCHIVE_INVALID`。
 
 ### 2.4 时间约定
 
@@ -326,9 +337,11 @@ UI 侧：**分类是可选的选择器，不用手打**——
 
 建议来源由 `POST /projects` 提供（`{workspace?}` → `{workspace, suggestions:[{name, source:'used'|'workspace'|'folder', count}]}`）：名称去重（大小写不敏感）、长度 ≤40，未知工作区返回 400 `WORKSPACE_UNKNOWN`。
 
-### 3.7 四视图：表格 / 看板 / 甘特图 / 日历
+### 3.7 五视图：表格 / 看板 / 甘特图 / 日历 / 回顾
 
-工具栏分段控件切换视图（`button` + `aria-pressed`），默认表格；**切换视图不丢状态**（筛选/排序/方向/分类筛选全部保留）。取数策略：表格与看板使用工具栏的筛选（看板在客户端分列，但状态筛选照常透传，不会「切到看板就静默失效」），甘特/日历取全量（`filter=all`），排序方向只影响表格；分类筛选在所有视图都透传。搜索是纯客户端过滤（标题 / 分类 / 文件路径），对四个视图同时生效。
+工具栏分段控件切换视图（`button` + `aria-pressed`），默认表格；**切换视图不丢状态**（筛选/排序/方向/分类筛选全部保留）。取数策略：表格与看板使用工具栏的筛选（看板在客户端分列，但状态筛选照常透传，不会「切到看板就静默失效」），甘特/日历取全量（`filter=all`），排序方向只影响表格；分类筛选在所有视图都透传。搜索是纯客户端过滤（标题 / 分类 / 文件路径），对所有视图同时生效。回顾视图（`views/insights.js`）取 `filter=all` 的活跃条目，按 `insightsScope`（近 7 天 / 近 30 天 / 全部）在客户端派生：完成条数、总跨度、平均跨度、预估对照、按分类 / 类型的跨度排行、「放得最久的」前 5 条；**不新增任何接口**。
+
+搁置清单（`filter=archived`）**只有表格视图能呈现**：看板 / 甘特 / 日历 / 回顾的视图按钮在该筛选下禁用（`title` 说明原因），切到搁置时若当前不是表格会自动切回表格。
 
 | 视图 | 布局与语义 | 专属控件 | 每项可做的操作 |
 | --- | --- | --- | --- |

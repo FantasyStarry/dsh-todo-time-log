@@ -78,6 +78,125 @@ export function formatDurationShort(createdAt, completedAt) {
   return hours > 0 ? t('board.durDaysHours', { d: days, h: hours }) : t('board.durDays', { d: days });
 }
 
+/** 预计用时的合法上限（分钟），与 Host 的 MAX_ESTIMATE_MINUTES 保持一致。 */
+export const MAX_ESTIMATE_MINUTES = 1440;
+
+/**
+ * 把任意输入规整成 1..1440 的整数分钟。
+ * `null` / `''` / 非数字 / 越界一律返回 null（= 未填），绝不静默变成 0。
+ */
+export function normalizeEstimate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const minutes = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(minutes)) return null;
+  const rounded = Math.round(minutes);
+  if (rounded < 1 || rounded > MAX_ESTIMATE_MINUTES) return null;
+  return rounded;
+}
+
+/** 分钟 → 人类可读（30 分钟 / 1 小时 / 1 小时 30 分）；null → '-'。 */
+export function formatEstimate(minutes) {
+  const value = normalizeEstimate(minutes);
+  if (value === null) return EMPTY_TIME;
+  if (value < 60) return t('estimate.minutes', { n: value });
+  const hours = Math.floor(value / 60);
+  const rest = value % 60;
+  return rest === 0 ? t('estimate.hours', { h: hours }) : t('estimate.hoursMinutes', { h: hours, m: rest });
+}
+
+/**
+ * 自定义输入框文本 → 分钟。
+ * 只接受正整数（1..1440）；空串表示「不填」，不算非法。
+ *
+ * @param {string} text
+ * @returns {{ ok: true, minutes: number | null } | { ok: false }}
+ */
+export function parseEstimateInput(text) {
+  const raw = typeof text === 'string' ? text.trim() : '';
+  if (raw === '') return { ok: true, minutes: null };
+  if (!/^\d+$/.test(raw)) return { ok: false };
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > MAX_ESTIMATE_MINUTES) return { ok: false };
+  return { ok: true, minutes };
+}
+
+/**
+ * 预计用时 vs 实际跨度（毫秒）的偏差。
+ * 任一侧缺失、或跨度非法时返回 null（界面就不显示偏差，不假装精确）。
+ *
+ * @param {number | null} estimateMinutes
+ * @param {number | null} spanMs
+ * @returns {{ percent: number, kind: 'over' | 'under' | 'even' } | null}
+ */
+export function estimateDeviation(estimateMinutes, spanMs) {
+  const estimate = normalizeEstimate(estimateMinutes);
+  if (estimate === null) return null;
+  if (typeof spanMs !== 'number' || !Number.isFinite(spanMs) || spanMs < 0) return null;
+  const percent = Math.round(((spanMs / 60000 - estimate) / estimate) * 100);
+  const kind = Math.abs(percent) < 5 ? 'even' : percent > 0 ? 'over' : 'under';
+  return { percent, kind };
+}
+
+/** 毫秒跨度 → 人类可读时长；规则与 formatDuration 一致（不含时区换算）。 */
+export function formatSpanMs(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return EMPTY_TIME;
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return t('detail.durationSeconds', { n: seconds });
+  if (seconds < 3600) return t('detail.durationMinutes', { n: Math.floor(seconds / 60) });
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return minutes > 0
+      ? t('detail.durationHoursMinutes', { h: hours, m: minutes })
+      : t('detail.durationHours', { h: hours });
+  }
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  return hours > 0
+    ? t('detail.durationDaysHours', { d: days, h: hours })
+    : t('detail.durationDays', { d: days });
+}
+
+/** 从创建到现在过了几个整天（向下取整，最小 0）；无法解析返回 null。 */
+export function ageInDays(createdAt, nowMs) {
+  const start = toMillis(createdAt);
+  if (start === null) return null;
+  const now = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+  return Math.max(0, Math.floor((now - start) / 86400000));
+}
+
+/** 「放了多久」的中性表述：今天 / N 小时 / N 天（不使用「逾期」措辞）。 */
+export function formatAge(createdAt, nowMs) {
+  const start = toMillis(createdAt);
+  if (start === null) return EMPTY_TIME;
+  const now = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+  const elapsed = Math.max(0, now - start);
+  const hours = Math.floor(elapsed / 3600000);
+  if (hours < 1) return t('age.today');
+  if (hours < 24) return t('age.hours', { n: hours });
+  // 天数统一走 ageInDays，避免这里和它各算一套取整规则。
+  const days = ageInDays(createdAt, now);
+  return t('age.days', { n: days === null ? Math.floor(elapsed / 86400000) : days });
+}
+
+/**
+ * 回顾视图的范围起点（毫秒）。`'all'` 返回 null（不限）。
+ * 按本地自然日 00:00 对齐，与甘特图的范围口径一致。
+ */
+export function insightsRangeStart(scope, nowMs) {
+  const now = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+  // 用 setDate 做「自然日」减法而不是减固定毫秒数：跨夏令时切换日减 6×86400000
+  // 会落到下午而不是当天 00:00，窗口就变成 6 天或 8 天。
+  const shifted = (days) => {
+    const date = new Date(now);
+    date.setDate(date.getDate() - days);
+    return startOfDay(date.getTime());
+  };
+  if (scope === 'week') return shifted(6);
+  if (scope === 'month') return shifted(29);
+  return null;
+}
+
 /** 搜索归一化：去首尾空白并转小写；非字符串返回空串。 */
 export function normalizeSearch(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -201,6 +320,8 @@ export function normalizeTodo(raw) {
     priority: normalizePriority(raw.priority),
     type: normalizeType(raw.type),
     status,
+    archivedAt: raw.archivedAt === undefined ? null : raw.archivedAt,
+    estimateMinutes: normalizeEstimate(raw.estimateMinutes),
     createdAt: raw.createdAt === undefined ? null : raw.createdAt,
     completedAt: raw.completedAt === undefined ? null : raw.completedAt,
     updatedAt: raw.updatedAt === undefined ? null : raw.updatedAt,
@@ -396,6 +517,7 @@ export function normalizeStats(raw, todos) {
     total: toCount(source.total, computed.total),
     pending: toCount(source.pending, computed.pending),
     completed: toCount(source.completed, computed.completed),
+    archived: toCount(source.archived, 0),
   };
 }
 

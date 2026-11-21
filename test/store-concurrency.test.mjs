@@ -40,7 +40,7 @@ async function makeTempFixture(t) {
 async function readTodos(dataFile) {
   const text = await fsp.readFile(dataFile, 'utf8');
   const parsed = JSON.parse(text); // must be valid JSON, never a torn write
-  assert.equal(parsed.version, 5);
+  assert.equal(parsed.version, 6);
   assert.ok(Array.isArray(parsed.todos));
   return parsed.todos;
 }

@@ -29,12 +29,19 @@ const now = () => clock;
 
 const source = new TodoStore({ dataFile: sourceFile, now });
 await source.load();
-const sourceA = await source.create({ title: '任务 A', project: '工作', priority: 'high' });
+const sourceA = await source.create({ title: '任务 A', project: '工作', priority: 'high', estimateMinutes: 45 });
 clock += 60_000;
 const sourceB = await source.create({ title: '任务 B', type: 'bug' });
 clock += 60_000;
 await source.complete(sourceB.todo.id);
-const sourceTodos = (await source.list({})).todos;
+clock += 60_000;
+// A third record stays 未完成 but 搁置, so the import must round-trip both v6 fields.
+const sourceC = await source.create({ title: '任务 C（搁置）', estimateMinutes: 15 });
+clock += 60_000;
+await source.archive(sourceC.todo.id);
+// `list('all')` hides 搁置 items, so a whole-dataset export uses `snapshot()`.
+const sourceTodos = (await source.snapshot()).todos;
+check('snapshot includes the shelved todo', sourceTodos.length === 3, sourceTodos.map((todo) => todo.title));
 const sourceJson = exportTodoData(sourceTodos, { format: 'json', now: clock });
 const parsed = parseImportText(sourceJson.content);
 
@@ -54,7 +61,7 @@ async function fileExists(file) {
 
 const dry = await target.importTodos(parsed.records, { mode: 'merge', dryRun: true });
 check('dry run ok', dry.ok === true && dry.dryRun === true, dry);
-check('dry run counts additions', dry.summary?.added === 2 && dry.summary?.changed === true, dry.summary);
+check('dry run counts additions', dry.summary?.added === 3 && dry.summary?.changed === true, dry.summary);
 check('dry run does not mutate memory', target.size === 0, target.size);
 check('dry run does not write the data file', (await fileExists(targetFile)) === false);
 
@@ -62,14 +69,35 @@ check('dry run does not write the data file', (await fileExists(targetFile)) ===
 
 const applied = await target.importTodos(parsed.records, { mode: 'merge' });
 check('merge import ok', applied.ok === true && applied.persisted === true, applied);
-check('merge import summary', applied.summary?.added === 2, applied.summary);
-check('merge import writes records', target.size === 2, target.size);
+check('merge import summary', applied.summary?.added === 3, applied.summary);
+check('merge import writes records', target.size === 3, target.size);
 check('first import has no backup (no file yet)', applied.backup === null, applied.backup);
-check('import notice mentions counts', (applied.notices ?? []).some((line) => line.includes('新增 2 条')), applied.notices);
+check('import notice mentions counts', (applied.notices ?? []).some((line) => line.includes('新增 3 条')), applied.notices);
 
 const again = await target.importTodos(parsed.records, { mode: 'merge' });
-check('re-import is a no-op', again.summary?.changed === false && again.summary?.skipped === 2, again.summary);
-check('re-import keeps the file', target.size === 2);
+check('re-import is a no-op', again.summary?.changed === false && again.summary?.skipped === 3, again.summary);
+check('re-import keeps the file', target.size === 3);
+
+// ---- v6 fields survive export -> import --------------------------------
+
+const importedA = await target.get(sourceA.todo.id);
+check('import keeps estimateMinutes', importedA.todo?.estimateMinutes === 45, importedA.todo);
+const importedC = await target.get(sourceC.todo.id);
+check(
+  'import keeps the shelved state',
+  importedC.todo?.archivedAt !== null && importedC.todo?.archivedAt !== undefined,
+  importedC.todo,
+);
+check(
+  'imported shelved todo stays out of the active list',
+  (await target.list({ filter: 'all' })).todos.every((todo) => todo.id !== sourceC.todo.id),
+);
+const archivedOnly = await target.list({ filter: 'archived' });
+check(
+  'imported shelved todo shows in the archived filter',
+  archivedOnly.todos.some((todo) => todo.id === sourceC.todo.id) && archivedOnly.stats.archived === 1,
+  archivedOnly.stats,
+);
 
 // ---- merge: newer wins, older is skipped ---------------------------------
 
@@ -105,27 +133,33 @@ check('add mode leaves the record unchanged', (await target.get(sourceA.todo.id)
 const replaceWith = parsed.records.filter((todo) => todo.id === sourceB.todo.id);
 const replaced = await target.importTodos(replaceWith, { mode: 'replace' });
 check('replace import ok', replaced.ok === true, replaced);
-check('replace removes the other record', replaced.summary?.removed === 1 && replaced.summary?.total === 1, replaced.summary);
+check('replace removes the other records', replaced.summary?.removed === 2 && replaced.summary?.total === 1, replaced.summary);
 check('replace creates a backup', typeof replaced.backup === 'string' && replaced.backup.startsWith(`${targetBase}.bak-`), replaced.backup);
 check('backup file exists on disk', await fileExists(path.join(dir, replaced.backup)), replaced.backup);
 check('replace leaves one record', target.size === 1, target.size);
 
 const restored = await target.restoreBackup(replaced.backup);
-check('restore ok', restored.ok === true && restored.restored === 2, restored);
-check('restore brings both records back', target.size === 2, target.size);
+check('restore ok', restored.ok === true && restored.restored === 3, restored);
+check('restore brings both records back', target.size === 3, target.size);
 check('restore creates a safety backup', typeof restored.backup === 'string' && restored.backup.startsWith(`${targetBase}.bak-`), restored.backup);
-check('restore notice', (restored.notices ?? []).some((line) => line.includes('已从备份恢复 2 条')), restored.notices);
+check('restore notice', (restored.notices ?? []).some((line) => line.includes('已从备份恢复 3 条')), restored.notices);
+check(
+  'restore brings the v6 fields back',
+  (await target.get(sourceA.todo.id)).todo?.estimateMinutes === 45
+    && (await target.get(sourceC.todo.id)).todo?.archivedAt !== null,
+  (await target.list({ filter: 'archived' })).todos,
+);
 
 // ---- refresh sees another instance's write -------------------------------
 
 const reader = new TodoStore({ dataFile: targetFile, now });
 await reader.load();
-check('reader started from the same two records', reader.size === 2, reader.size);
+check('reader started from the same three records', reader.size === 3, reader.size);
 clock += 60_000;
 const added = await target.create({ title: '任务 C' });
 check('target created a third record', added.ok === true);
 await reader.refresh();
-check('refresh merges the other instance write', reader.size === 3, reader.size);
+check('refresh merges the other instance write', reader.size === 4, reader.size);
 const readerList = await reader.list({});
 check('refreshed list contains the new record', readerList.todos.some((todo) => todo.title === '任务 C'));
 

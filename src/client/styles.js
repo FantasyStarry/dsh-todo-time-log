@@ -7,6 +7,7 @@ export const FILTERS = [
   { value: 'all', labelKey: 'filter.all' },
   { value: 'pending', labelKey: 'filter.pending' },
   { value: 'completed', labelKey: 'filter.completed' },
+  { value: 'archived', labelKey: 'filter.archived' },
 ];
 export const PRIORITIES = [
   { value: '', labelKey: 'priority.none' },
@@ -32,7 +33,25 @@ export const VIEWS = [
   { value: 'board', labelKey: 'view.board' },
   { value: 'gantt', labelKey: 'view.gantt' },
   { value: 'calendar', labelKey: 'view.calendar' },
+  { value: 'insights', labelKey: 'view.insights' },
 ];
+/** 回顾视图的范围档位（近 7 天 / 近 30 天 / 全部）。 */
+export const INSIGHTS_SCOPES = [
+  { value: 'week', labelKey: 'insights.scopeWeek' },
+  { value: 'month', labelKey: 'insights.scopeMonth' },
+  { value: 'all', labelKey: 'insights.scopeAll' },
+];
+/** 预计用时的常用档位；`custom` 用哨兵值触发数字输入框。 */
+export const ESTIMATE_PRESETS = [
+  { value: '', labelKey: 'estimate.none' },
+  { value: '15', labelKey: 'estimate.preset15' },
+  { value: '30', labelKey: 'estimate.preset30' },
+  { value: '60', labelKey: 'estimate.preset60' },
+  { value: '120', labelKey: 'estimate.preset120' },
+  { value: '240', labelKey: 'estimate.preset240' },
+];
+/** 「自定义…」哨兵值（原生 select 里的特殊选项）。 */
+export const ESTIMATE_CUSTOM = '__ttl_custom_estimate__';
 export const BOARD_GROUPS = [
   { value: 'status', labelKey: 'board.groupStatus' },
   { value: 'project', labelKey: 'board.groupProject' },
@@ -85,6 +104,8 @@ export function queryForView(view, filter, sortBy, direction) {
   if (view === 'gantt') return { filter: 'all', sortBy: 'createdAt', direction: 'asc' };
   // 看板的分组/落列在客户端完成，但状态筛选仍然生效（与表格同一状态源，避免「筛选静默失效」）。
   if (view === 'board') return { filter, sortBy: 'createdAt', direction: 'desc' };
+  // 回顾视图自己按时间范围派生汇总，始终取全量活跃条目。
+  if (view === 'insights') return { filter: 'all', sortBy: 'createdAt', direction: 'asc' };
   if (view === 'calendar') return { filter: 'all', sortBy: 'createdAt', direction: 'asc' };
   return { filter, sortBy, direction };
 }
@@ -213,7 +234,11 @@ export const CSS_TEXT = `.ttl-root {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
 }
 .ttl-composer-input {
-  flex: 1 1 220px;
+  /* 基础宽度取 150px 而不是 220px：composer 是 flex-wrap 容器，十七期又加了一个
+     「预计用时」选择器（约 107px），220px 的信息在 916px 真机宽度下会把「添加」
+     挤到第二行单独成行。改成 150px 后整行放得下，输入框靠 flex-grow 吃掉剩余空间，
+     窄面板时仍按原有换行规则优雅折行。 */
+  flex: 1 1 150px;
   min-width: 0;
   height: 36px;
   padding: 0 8px;
@@ -1504,7 +1529,9 @@ export const CSS_TEXT = `.ttl-root {
 .ttl-col-status { width: 160px; }
 .ttl-col-createdAt { width: 126px; }
 .ttl-col-completedAt { width: 126px; }
-.ttl-col-actions { width: 118px; }
+/* 操作列 118 → 136px：十七期行尾菜单多了「搁置 / 取回」一项（4 项 × 28px = 112px +
+   左右各 12px 内边距），118px 装不下会让「删除」掉到第二行、行高被撑到 40px。 */
+.ttl-col-actions { width: 136px; }
 .ttl-th {
   height: 34px;
   padding: 0 12px;
@@ -2259,6 +2286,80 @@ export const CSS_TEXT = `.ttl-root {
   .ttl-search { width: 100%; }
   .ttl-search input { width: 100%; }
 }
+
+/* ── 回顾视图（十七期）：数字卡 + 跨度排行 + 放得最久 ───────────────── */
+.ttl-insights { display: flex; flex-direction: column; gap: 12px; padding: 12px 12px 16px; }
+.ttl-insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ttl-insights-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-module-platform);
+}
+.ttl-insights-card-label { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1.2; }
+.ttl-insights-card-value {
+  color: var(--dsw-alias-label-primary);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.ttl-insights-card-hint { color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 1.3; }
+.ttl-insights-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+.ttl-insights-panel {
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+.ttl-insights-panel-title { margin: 0 0 8px; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; }
+.ttl-insights-bars { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ttl-insights-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.ttl-insights-bar-label {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ttl-insights-bar-value { color: var(--dsw-alias-label-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ttl-insights-bar-track { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--dsw-alias-bg-skeleton); overflow: hidden; }
+.ttl-insights-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 68%, transparent);
+}
+.ttl-insights-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ttl-insights-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.ttl-insights-row-age { flex: none; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
+.ttl-insights-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttl-insights-note { color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 1.4; }
+.ttl-insights-empty { padding: 28px 12px; color: var(--dsw-alias-label-tertiary); text-align: center; font-size: 13px; }
+
+/* 预计用时：表格第三行 / 详情行 / 表单选择器 */
+.ttl-time-estimate { display: block; color: var(--dsw-alias-label-caption); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ttl-time-estimate[data-deviation='over'] { color: var(--dsw-alias-state-warn-label); }
+.ttl-time-estimate[data-deviation='under'] { color: var(--dsw-alias-state-success-primary); }
+.ttl-estimate-select { flex: none; }
+.ttl-estimate-custom { width: 76px; }
+.ttl-estimate-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; }
+
+/* 搁置：行标记 + 清单说明 */
+.ttl-archived-hint {
+  padding: 8px 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+.ttl-archived-badge { color: var(--dsw-alias-label-caption); font-size: 12px; }
+.ttl-table-row[data-archived='true'] .ttl-td-title { color: var(--dsw-alias-label-secondary); }
+@media (max-width: 560px) {
+  .ttl-insights { padding: 8px; }
+  .ttl-insights-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 `;
 
 /** 组件内 <style> 元素：卸载时由 React 自动移除。 */
@@ -2520,6 +2621,7 @@ export const QUICK_CSS_TEXT = `.ttl-quick-trigger {
   line-height: 18px;
 }
 .ttl-quick-elapsed { flex: none; font-variant-numeric: tabular-nums; }
+.ttl-quick-age { flex: none; color: var(--dsw-alias-label-caption); font-size: 12px; }
 .ttl-quick-project {
   display: inline-flex;
   align-items: center;

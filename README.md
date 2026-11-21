@@ -66,6 +66,18 @@
 </p>
 
 <p align="center">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/insights.png" alt="回顾视图：完成条数 / 总跨度 / 平均跨度 / 预估对照 + 分类与类型排行 + 放得最久的" width="100%">
+  <br>
+  <sub><b>回顾</b>：近 7 天 / 近 30 天 / 全部 —— 完成了多少、一共花了多久、估得准不准、什么最占时间，以及「放得最久的」那几条</sub>
+</p>
+
+<p align="center">
+  <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/archived.png" alt="搁置清单：中性说明 + 已搁置标记 + 行尾可一键取回" width="100%">
+  <br>
+  <sub><b>搁置</b>：暂时放下不等于删掉 —— 不进完成统计、不进四视图，只在「搁置」筛选里安静待着，随时能取回</sub>
+</p>
+
+<p align="center">
   <img src="https://github.com/FantasyStarry/dsh-todo-time-log/raw/main/docs/images/quick-entry.png" alt="快速入口：主输入框下方的「待办」胶囊与展开的清单卡片" width="100%">
   <br>
   <sub><b>快速入口</b>：聊天时不用离开主界面 —— 输入框下方常驻「待办」胶囊（数字是未完成条数），点开就是进行中清单；勾一下即完成，一行输入记一条</sub>
@@ -144,11 +156,14 @@
 | 能力 | 说明 |
 | --- | --- |
 | 🕒 创建 / 完成时间 | 全自动记录，本地时间 `YYYY-MM-DD HH:mm:ss`，未完成显示 `-`；表格的完成时间列直接给出「用时 / 进行中」两行，重复完成、重复取消都会给出明确提示 |
-| 🗂 四视图 | 表格 / 看板 / 甘特图 / 日历，同一份数据四种视角；切换视图保留筛选与排序，排序统一走表头 |
+| 🗂 五视图 | 表格 / 看板 / 甘特图 / 日历 / **回顾**，同一份数据五种视角；切换视图保留筛选与排序，排序统一走表头 |
 | 🧭 行内操作 | 勾选圈完成、点标题展开详情、行尾「⋯」编辑 / 删除；删除二次确认后仍可用 toast 撤销 |
 | ⚡ 快速入口 | 主输入框下方常驻「待办」胶囊（显示未完成条数），点开是进行中清单：勾一下即完成（卡片内带「撤销」），一行输入 + Enter 直接记一条；只做「看进行中 / 勾掉 / 记一条」，编辑删除仍在面板。**默认开，可在待办面板页头「设置」里关掉**（关掉后胶囊、清单与 60s 轮询一起停，面板与 `/todo` 不受影响） |
 | 📊 甘特图 | 纯前端计算（不新增接口）：轨道自适应不再裁切，右侧「用时」列常显（进行中带已进行时长）；条形 = 创建 → 完成 / 现在，分类分组可折叠并聚合；今天 / 近 7 天 / 近 30 天 / 全部四档范围按自然日对齐 |
 | 🏷 分类 · 优先级 · 类型 | 项目分类（可从「已用分类 / 工作区 / 文件夹」建议里选）、高 / 中 / 低优先级、缺陷 / 新功能 / 改进 / 疑问 / 杂项 / 其他 |
+| 📐 搁置（不是删除） | 暂时放下但不删：「⋯」→「搁置」，该条不进完成统计、不进四视图，只在表格的「搁置」筛选里；可一键「取回」，也可直接勾掉完成。**不做红色逾期** —— 放下不是欠债 |
+| 🎯 预计用时 | 新建 / 行内编辑可选 15 分钟–半天或自定义；完成时间列给第三行「预计 2 小时 · 超出 8%」，只在填了预计且已完成时才算偏差，不假装精确 |
+| 📈 回顾视图 | 近 7 天 / 近 30 天 / 全部：完成条数、总跨度、平均跨度、预估对照（平均偏差），按分类 / 类型的跨度排行，以及「放得最久的」5 条（中性文案，不催不罚） |
 | 📎 `@工作区文件` | 把待办关联到代码文件；只给文件、不给分类时，自动取文件所在目录作为分类 |
 | ✍️ 五种录入 | 面板表单、对话式一句话（`新任务 写周报 #工作`）、`/todo` 斜杠命令、智能体工具 `todo_time_log`、主输入框下方胶囊里一行输入 |
 | 🤖 智能体工具 | 智能体可 `list / get / create / complete / uncomplete / update / delete / health`，与 UI 共用同一实现 |
@@ -234,6 +249,7 @@ plugin_manager action=install_bundle target=<本地仓库绝对路径>
 | 分类 | `#工作` / `@生活` / `[工作]` / `项目：工作` / `分类：工作` | 取最左的非空值，并从标题里剥离 |
 | 优先级 | `!high` / `!medium` / `!low`（`!h` `!m` `!l`、`!高` `!中` `!低`） | 未写则回退到表单选择器 |
 | 类型 | `^bug` / `^feature` / `^improvement` / `^question` / `^chore` / `^other`（中文 `^缺陷` / `^新功能` …，也支持 `类型：bug` / `type:bug`） | 未知值保留原文 |
+| 预计用时 | `~30m` / `~90min` / `~2h` / `~30分` / `~2小时`（也支持 `预计30分` / `预计：2小时` / `预计用时 45 分钟`） | 1–1440 分钟；`1.5h` 允许小数；超范围不当作标记 |
 | 文件 | `@路径/文件`、`@"docs/My File.md"` | 记为工作区相对路径；没有显式分类时自动取文件所在目录 |
 | 多条 | 换行、`；`、`;` 分隔 | 只有填充词的行会被跳过，不会创建空待办 |
 
@@ -245,6 +261,8 @@ plugin_manager action=install_bundle target=<本地仓库绝对路径>
 todo_time_log { "action": "create", "title": "修复登录", "priority": "high", "type": "bug" }
 todo_time_log { "action": "list", "filter": "pending", "sortBy": "priority", "direction": "asc" }
 todo_time_log { "action": "complete", "id": "ttl_…" }
+todo_time_log { "action": "archive", "id": "ttl_…" }          # 搁置（unarchive 取回）
+todo_time_log { "action": "create", "title": "写周报", "estimateMinutes": 45 }
 ```
 
 ```bash
@@ -260,9 +278,9 @@ HTTP 接口与智能体工具共用同一个业务实现（`executeTodoAction`�
 
 | 能力 | 说明 |
 | --- | --- |
-| 导出 JSON | 无损信封（`version: 5` + 全部字段 + 时间戳），可原样回导；导出前会先合并其他窗口刚写入的数据 |
-| 导出 CSV | UTF-8 BOM + CRLF，Excel 直接打开；时间为本地 `YYYY-MM-DD HH:mm:ss`（秒级，毫秒级无损请用 JSON），`文件` 用 `;` 分隔，额外一列只读的 `耗时(分钟)` |
-| 导入 JSON | 支持本插件信封 v1–v5、裸 `Todo[]` 数组；旧版本字段自动迁移 |
+| 导出 JSON | 无损信封（`version: 6` + 全部字段含 `archivedAt` / `estimateMinutes` + 时间戳），可原样回导；导出前会先合并其他窗口刚写入的数据 |
+| 导出 CSV | UTF-8 BOM + CRLF，Excel 直接打开；时间为本地 `YYYY-MM-DD HH:mm:ss`（秒级，毫秒级无损请用 JSON），`文件` 用 `;` 分隔，额外只读列 `耗时(分钟)` / `预计(分钟)` / `搁置时间` |
+| 导入 JSON | 支持本插件信封 v1–v6、裸 `Todo[]` 数组；旧版本字段自动迁移 |
 | 导入 CSV | 中英文表头别名（标题/title、分类/project、状态/status、优先级/priority、类型/type、创建时间/createdAt …），中文值「已完成 / 高 / 缺陷」也能识别 |
 | 两段式导入 | 选文件后先 `dryRun` 预览「新增 / 更新 / 跳过 / 移除 / 非法行」，确认后才写盘 |
 | 冲突策略 | **合并**（默认，同 ID 取 `updatedAt` 较新）/ **仅新增**（同 ID 跳过）/ **覆盖全部**（先自动备份再整体替换） |
@@ -288,7 +306,7 @@ HTTP 接口与智能体工具共用同一个业务实现（`executeTodoAction`�
 | 插件 ID / 包名 | `dsh-todo-time-log`（dsh 不加命名空间前缀，与官方插件一致；短别名 `todo-time-log` / `ttl`） |
 | DSH | `>=0.2.0-rc.2 <0.2.3-0`（已实测 0.2.2-rc.1） |
 | Node.js | ≥ 20 |
-| 数据版本 | `version: 5`（旧版本自动迁移） |
+| 数据版本 | `version: 6`（v1–v5 自动迁移） |
 | HTTP 接口 | `POST /api/dsh-todo-time-log/*`（经宿主认证：无登录态 401、跨站/不可信来源 403） |
 | 安装位置 | 中央面板 `main` + 侧边栏 `sidebar.panellist` + 主输入框 `conversation.composer.dock`（「待办」胶囊）/ `conversation.input.overlay`（展开的清单）；快速入口开关在面板页头「设置」卡里，不占宿主槽位 |
 
@@ -299,7 +317,7 @@ HTTP 接口与智能体工具共用同一个业务实现（`executeTodoAction`�
 ```bash
 npm install
 npm run build      # esbuild：src/client/ → lib/client.js
-npm test           # 497 个用例：解析 / 数据层 / HTTP（含宿主认证）/ 设置偏好 / UI 渲染 / 并发写入
+npm test           # 用例：解析 / 数据层 / HTTP（含宿主认证）/ 设置偏好 / UI 渲染 / 并发写入
 npm run verify     # check + lint + typecheck + build + test + audit（发布前必跑）
 ```
 
@@ -311,7 +329,7 @@ npm run verify     # check + lint + typecheck + build + test + audit（发布前
 
 | 文档 | 内容 |
 | --- | --- |
-| [`docs/architecture.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/architecture.md) | 目录结构、数据模型、Host / Client 架构、四视图与界面层级、toast 实现 |
+| [`docs/architecture.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/architecture.md) | 目录结构、数据模型、Host / Client 架构、五视图与界面层级、toast 实现 |
 | [`docs/development.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/development.md) | 测试矩阵、手工验证清单、发布流程 |
 | [`docs/limitations.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/limitations.md) | 已知限制与 TODO（配置 schema、时区、启发式解析等） |
 | [`docs/verification.md`](https://github.com/FantasyStarry/dsh-todo-time-log/blob/main/docs/verification.md) | 独立第三方 QA 验证报告（PASS / FAIL / 盲区） |
@@ -325,4 +343,4 @@ npm run verify     # check + lint + typecheck + build + test + audit（发布前
 
 ---
 
-**In English** — A todo plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that records and shows each todo's **created and completed time**. Four views (table / board / Gantt / calendar) where every Gantt bar is the real created→completed lifetime; project categories, priority, type, `@workspace-file` references, a `/todo` slash command with natural-language capture, a `todo_time_log` agent tool, and a quick-entry pill under the composer to add or tick off pending todos without leaving the chat (it can be switched off from the Preferences card in the panel header; the preference lives on the Host and is shared by every browser). All data stays in a local JSON file.
+**In English** — A todo plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that records and shows each todo's **created and completed time**. Five views (table / board / Gantt / calendar / review) where every Gantt bar is the real created→completed lifetime; **shelving** puts a todo aside without deleting it (never shown as red overdue), an optional **estimate** is compared with the real span, and the review view sums up what got done and what waited the longest; project categories, priority, type, `@workspace-file` references, a `/todo` slash command with natural-language capture, a `todo_time_log` agent tool, and a quick-entry pill under the composer to add or tick off pending todos without leaving the chat (it can be switched off from the Preferences card in the panel header; the preference lives on the Host and is shared by every browser). All data stays in a local JSON file.

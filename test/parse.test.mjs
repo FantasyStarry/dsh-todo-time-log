@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inspect } from 'node:util';
-import { parseQuickAdd, parseQuickAddLine, normalizeFilePath, looksLikeFilePath, stripFillers, hasQuickAddMarkers, hasPriorityMarker, hasTypeMarker } from '../lib/parse.js';
+import { parseQuickAdd, parseQuickAddLine, normalizeFilePath, looksLikeFilePath, stripFillers, hasQuickAddMarkers, hasPriorityMarker, hasTypeMarker, hasEstimateMarker } from '../lib/parse.js';
 import { deriveProjectFromFiles, validateFiles } from '../lib/store.js';
 
 // Registers each assertion as an independent `node:test` test so failures
@@ -210,3 +210,119 @@ check('hasTypeMarker false for unknown ^value', hasTypeMarker('^foo 写周报') 
 check('hasTypeMarker false for prototype:bug', hasTypeMarker('prototype:bug 修复') === false);
 check('^buggy is not a type marker', hasTypeMarker('^buggy 任务') === false);
 check('hasQuickAddMarkers recognises type marker', hasQuickAddMarkers('写周报 ^bug') === true);
+
+// estimate markers (v6): ~30m / ~2h / 预计：2小时 …
+check('parse without estimate marker is null', parse1.estimateMinutes === null, parse1);
+const estimateTilde = ['~30m', '~30分', '~30分钟', '~90min', '~2h', '~2时', '~2小时']
+  .map((marker) => parseQuickAddLine(`写周报 ${marker}`));
+check(
+  'tilde estimate markers parsed',
+  estimateTilde.map((parsed) => parsed.estimateMinutes).join('|') === '30|30|30|90|120|120|120',
+  estimateTilde.map((parsed) => parsed.estimateMinutes),
+);
+check(
+  'tilde estimate markers stripped from titles',
+  estimateTilde.every((parsed) => parsed.title === '写周报'),
+  estimateTilde.map((parsed) => parsed.title),
+);
+const estimateDecimal = parseQuickAddLine('写周报 ~1.5h');
+check(
+  'decimal hour estimate rounds to whole minutes',
+  estimateDecimal.estimateMinutes === 90 && estimateDecimal.title === '写周报',
+  estimateDecimal,
+);
+const estimateExplicit = ['预计30分', '预计：2小时', '预计用时 45 分钟', '预计: 30 分钟']
+  .map((marker) => parseQuickAddLine(`写周报 ${marker}`));
+check(
+  'explicit estimate forms parsed',
+  estimateExplicit.map((parsed) => parsed.estimateMinutes).join('|') === '30|120|45|30',
+  estimateExplicit.map((parsed) => parsed.estimateMinutes),
+);
+check(
+  'explicit estimate forms stripped from titles',
+  estimateExplicit.every((parsed) => parsed.title === '写周报'),
+  estimateExplicit.map((parsed) => parsed.title),
+);
+const estimateLimited = parseQuickAddLine('写周报 ~1440m');
+check('estimate upper bound accepted', estimateLimited.estimateMinutes === 1440, estimateLimited);
+const estimateTooLong = parseQuickAddLine('写周报 ~1441m');
+check(
+  'out-of-range estimate is not a marker and stays in the title',
+  estimateTooLong.estimateMinutes === null && estimateTooLong.title === '写周报 ~1441m',
+  estimateTooLong,
+);
+const estimateZero = parseQuickAddLine('写周报 ~0m');
+check(
+  'zero estimate is not a marker and stays in the title',
+  estimateZero.estimateMinutes === null && estimateZero.title === '写周报 ~0m',
+  estimateZero,
+);
+const estimateLeftmost = parseQuickAddLine('~30m 写周报 ~2h');
+check(
+  'leftmost estimate marker wins',
+  estimateLeftmost.estimateMinutes === 30 && estimateLeftmost.title === '写周报',
+  estimateLeftmost,
+);
+const estimateMulti = parseQuickAdd('写周报 ~30m；买牛奶 ~1h\n回邮件 预计：45分钟');
+check(
+  'estimate parsed per quick-add item',
+  estimateMulti.items.map((item) => item.estimateMinutes).join('|') === '30|60|45',
+  estimateMulti.items,
+);
+const estimateWithEverything = parseQuickAddLine('修复登录 ~45m !high ^bug #工作 @src/auth/login.ts');
+check(
+  'estimate coexists with priority, type, project and files',
+  estimateWithEverything.estimateMinutes === 45
+    && estimateWithEverything.priority === 'high'
+    && estimateWithEverything.type === 'bug'
+    && estimateWithEverything.project === '工作'
+    && estimateWithEverything.files[0] === 'src/auth/login.ts'
+    && estimateWithEverything.title === '修复登录',
+  estimateWithEverything,
+);
+check('预计 without a number+unit is not a marker', hasEstimateMarker('预计下周上线') === false);
+check('预计下周上线 keeps the whole title', parseQuickAddLine('预计下周上线').title === '预计下周上线');
+check('~abc is not an estimate marker', hasEstimateMarker('写周报 ~abc') === false);
+check('hasEstimateMarker true', hasEstimateMarker('写周报 ~30m') === true);
+check('hasEstimateMarker true for explicit form', hasEstimateMarker('写周报 预计：2小时') === true);
+check('hasEstimateMarker false for out-of-range value', hasEstimateMarker('写周报 ~1441m') === false);
+check('hasQuickAddMarkers recognises estimate marker', hasQuickAddMarkers('写周报 ~30m') === true);
+check('hasQuickAddMarkers ignores out-of-range estimate', hasQuickAddMarkers('写周报 ~1441m') === false);
+
+test('预计用时：显式「预计」形态需要前边界，不静默改写普通标题', () => {
+  // 「上周预计30分」里的「预计30分」不是标记：没有前边界就该整句留在标题里。
+  // 回归：加边界前会被解析成标题「上周」+ 30 分钟，普通标题被吃掉。
+  for (const line of ['上周预计30分', '需要预计30分钟', 'A预计30分']) {
+    const parsed = parseQuickAddLine(line);
+    assert.equal(parsed.estimateMinutes, null, `${line} 不应产生预计用时`);
+    assert.equal(parsed.title, line, `${line} 的标题应原样保留`);
+  }
+  // 有边界时正常识别
+  assert.equal(parseQuickAddLine('写周报 预计30分').estimateMinutes, 30);
+  assert.equal(parseQuickAddLine('写周报 预计30分').title, '写周报');
+  assert.equal(parseQuickAddLine('写周报 预计：2小时').estimateMinutes, 120);
+  assert.equal(parseQuickAddLine('写周报 预计用时 45 分钟').estimateMinutes, 45);
+});
+
+test('标记剥离按偏移：同一标记文本出现两次时不留残余', () => {
+  // 回归：原先用 String.replace(text, ' ') 只替换第一次出现的子串，
+  // 命中位置错位导致有效标记残留在标题里。四种标记共用同一条剥离路径。
+  // 「~30m中」不是有效标记（后面紧跟汉字，没有 token 边界），应作为标题文本保留；
+  // 真正要断言的是此后那个「~30m」被按偏移正确剥离，而不是把前一个删掉。
+  const estimate = parseQuickAddLine('写周报 ~30m中 复盘 ~30m');
+  assert.equal(estimate.estimateMinutes, 30);
+  assert.equal(estimate.title, '写周报 ~30m中 复盘', `有效标记应被剥离、非标记应保留：${estimate.title}`);
+
+  const priority = parseQuickAddLine('写周报 !highx 复盘 !high');
+  assert.equal(priority.priority, 'high');
+  assert.equal(priority.title, '写周报 !highx 复盘', `非标记应保留：${priority.title}`);
+
+  const type = parseQuickAddLine('修 bug ^bugx 再 ^bug 复盘');
+  assert.equal(type.type, 'bug');
+  assert.equal(type.title, '修 bug ^bugx 再 复盘', `非标记应保留：${type.title}`);
+
+  // 两个都是有效标记时，两处都该剥离，且取最左的值
+  assert.equal(parseQuickAddLine('写周报 ~2h 复盘 ~30m').title, '写周报 复盘');
+  assert.equal(parseQuickAddLine('写周报 !high 复盘 !low').title, '写周报 复盘');
+  assert.equal(parseQuickAddLine('修 bug ^bug 再 ^feature 复盘').title, '修 bug 再 复盘');
+});

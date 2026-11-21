@@ -1,15 +1,41 @@
 /** 表格视图（含行渲染）。 */
-import { EMPTY_TIME, formatDurationShort, formatTime, groupTodosByProject, normalizeFiles, normalizeProject, projectLabel } from '../helpers.js';
+import { EMPTY_TIME, estimateDeviation, formatDurationShort, formatEstimate, formatTime, groupTodosByProject, normalizeEstimate, normalizeFiles, normalizeProject, projectLabel, toMillis } from '../helpers.js';
 import { t } from '../i18n.js';
 import { h } from '../runtime.js';
 import { TABLE_COLUMNS } from '../styles.js';
 import { EmptyPlaceholder, ProjectBadge } from '../widgets.js';
 
+/**
+ * 完成时间列第三行：预计用时；已完成条目再对照「完成时刻 - 创建时刻」的跨度给出偏差。
+ * 未完成 / 跨度不可解析 / 幅度 <5% 只显示基础文案，`data-deviation` 保持 'none'（不假装精确）。
+ */
+function renderEstimateLine(todo, completed) {
+  const estimate = normalizeEstimate(todo.estimateMinutes);
+  if (estimate === null) return null;
+  const base = t('estimate.line', { value: formatEstimate(estimate) });
+  let kind = 'none';
+  let text = base;
+  if (completed) {
+    const startMs = toMillis(todo.createdAt);
+    const endMs = toMillis(todo.completedAt);
+    const deviation = startMs === null || endMs === null ? null : estimateDeviation(estimate, endMs - startMs);
+    if (deviation !== null && deviation.kind === 'over') {
+      kind = 'over';
+      text = `${base} · ${t('estimate.over', { percent: Math.abs(deviation.percent) })}`;
+    } else if (deviation !== null && deviation.kind === 'under') {
+      kind = 'under';
+      text = `${base} · ${t('estimate.under', { percent: Math.abs(deviation.percent) })}`;
+    }
+  }
+  return h('span', { className: 'ttl-time-estimate', 'data-deviation': kind }, text);
+}
+
 export function createTableView(deps) {
-  const { busyId, cancelEdit, confirmId, detailIdOf, direction, editingId, editingPriority, editingType, emptyActionKey, expandedIds, filter, handleDelete, handleEmptyAction, handleHeaderSort, listStatus, nowMs, priorityBadge, prioritySelectControl, projectInput, renderDetailContent, renderFileChips, renderRowCheck, saveEdit, setConfirmId, setEditingPriority, setEditingType, setTableActionsId, sortBy, startEdit, statusBadge, tableActionsId, titleInput, toggleExpanded, typeBadge, typeSelectControl, visibleTodos } = deps;
+  const { busyId, cancelEdit, confirmId, detailIdOf, direction, editingId, editingPriority, editingType, emptyActionKey, expandedIds, filter, handleArchive, handleDelete, handleEmptyAction, handleHeaderSort, handleUnarchive, listStatus, nowMs, priorityBadge, prioritySelectControl, projectInput, renderDetailContent, renderEstimateControl, renderFileChips, renderRowCheck, saveEdit, setConfirmId, setEditingPriority, setEditingType, setTableActionsId, sortBy, startEdit, statusBadge, tableActionsId, titleInput, toggleExpanded, typeBadge, typeSelectControl, visibleTodos } = deps;
 
   const pushTableRow = (rows, todo, index) => {
     const completed = todo.status === 'completed';
+    const archived = todo.archivedAt !== null && todo.archivedAt !== undefined;
     const isEditing = editingId === todo.id;
     const expanded = expandedIds[todo.id] === true;
     const actionsOpen = tableActionsId === todo.id;
@@ -37,6 +63,7 @@ export function createTableView(deps) {
               },
               todo.title === '' ? t('list.empty') : todo.title
             ),
+            archived ? h('span', { className: 'ttl-archived-badge' }, t('row.archivedBadge')) : null,
             normalizeFiles(todo.files).length > 0 ? renderFileChips(todo, { max: 1, compact: true }) : null
           )
         );
@@ -47,6 +74,7 @@ export function createTableView(deps) {
           key: todo.id,
           className: 'ttl-table-row',
           'data-status': todo.status,
+          'data-archived': todo.archivedAt ? 'true' : undefined,
           // 入场错位：只给前 7 行加延迟（12ms 一步），长列表不用等。
           style: { animationDelay: `${Math.min(index || 0, 6) * 12}ms` },
           onKeyDown: (event) => {
@@ -74,7 +102,9 @@ export function createTableView(deps) {
                 'span',
                 { className: 'ttl-edit-status' },
                 prioritySelectControl(editingPriority, setEditingPriority, busyId === todo.id),
-                typeSelectControl(editingType, setEditingType, busyId === todo.id)
+                typeSelectControl(editingType, setEditingType, busyId === todo.id),
+                // 行内编辑必须能改预计用时：表格是默认视图，缺了它「编辑预计」在默认视图里等于不存在。
+                renderEstimateControl('edit', busyId === todo.id)
               )
             : h('span', { className: 'ttl-badge-row' }, statusBadge(todo), typeBadge(todo), priorityBadge(todo))
         ),
@@ -90,7 +120,9 @@ export function createTableView(deps) {
                 'span',
                 { className: 'ttl-time-duration', 'data-status': todo.status },
                 t(completed ? 'table.spent' : 'table.elapsed', { duration })
-              )
+              ),
+          // 第三行：预计用时（有值才出现；已完成时附「超出 / 省下 X%」）。
+          renderEstimateLine(todo, completed)
         ),
         h(
           'td',
@@ -197,6 +229,27 @@ export function createTableView(deps) {
                               },
                               t('row.edit')
                             ),
+                            // 搁置 / 取回：已完成条目不给这一项（已完成不在搁置清单语义内）。
+                            completed
+                              ? null
+                              : h(
+                                  'button',
+                                  {
+                                    key: 'archive',
+                                    type: 'button',
+                                    className: 'ttl-row-menu-item',
+                                    disabled: busyId === todo.id,
+                                    onClick: () => {
+                                      setTableActionsId(null);
+                                      if (archived) {
+                                        void handleUnarchive(todo);
+                                      } else {
+                                        void handleArchive(todo);
+                                      }
+                                    },
+                                  },
+                                  t(archived ? 'row.unarchive' : 'row.archive')
+                                ),
                             h(
                               'button',
                               {

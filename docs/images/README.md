@@ -29,9 +29,15 @@ jsdom 里挂载、`act()` 里触发交互进入目标状态后，再用无头 Ch
 - 操作标注：在渲染页里按 `getBoundingClientRect()` 实时定位 ①②③④ 圆形编号徽章，底部图例条与面板等宽；
 - 为排版清晰，渲染页对少量 CSS 做了覆盖（甘特页放开页面最大宽度、把「进行中」标签移到条尾外侧、看板列宽铺满数据卡片；`demo-quickadd` 在页面里隐藏下方数据卡片以便聚焦对话区），**组件源码未改**；像素级真机外观请以实际页面为准；
 - 单张 PNG 均 ≤500KB。
-- README 正文引用 15 张（banner / hero / board / calendar / gantt / dark / board-swimlanes / 4 张 demo-* /
-  3 张 quick-entry* / `settings-quick-entry`）；`settings-quick-entry-off.png`、`chat-quickadd.png`、
-  `complete-toast.png`、`narrow.png` 作为备用图保留在本目录，未放进 README 正文。
+- README 正文引用 17 张（banner / hero / board / calendar / gantt / dark / board-swimlanes / 4 张 demo-* /
+  3 张 quick-entry* / `settings-quick-entry` / **`insights.png` · `archived.png`（十七期）**）；
+  `settings-quick-entry-off.png`、`chat-quickadd.png`、`complete-toast.png`、`narrow.png` 作为备用图保留在本目录，
+  未放进 README 正文。
+- 十七期两张新图说明：`insights.png` 是**回顾视图**（默认「近 7 天」），`archived.png` 是**搁置清单**（筛选切到「搁置」）。
+  两者都由 `.tools/preview/render.mjs` 的 `insights` / `archived` 场景生成（演示数据，非真机用户数据）：
+  十七期给演示数据补了 `archivedAt` / `estimateMinutes`，并让 mock 的 `/list` 与 Host 的 v6 口径一致
+  （`stats` 四字段、`'all'` 排除搁置项、`projects[]` 带 `archived` 分项、`estimateMinutes` 排序空值置尾）。
+  演示用的预计值刻意选得与真实跨度相称（+10% 量级），避免图上出现 +1000% 这种会让人误以为算错的数字。
 
 **关于 `quick-entry*.png`（十四期 快速入口）**：从下往上是「胶囊 + 上下文占用胶囊」在同一 dock 行、
 composer 卡片、浮在卡片上沿之上的待办清单卡片（间距 8px）。卡片与胶囊来自仓库真实构建产物

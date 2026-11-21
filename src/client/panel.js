@@ -1,12 +1,13 @@
 /** 面板主体 TodoPanel + 错误边界 + main 槽组件工厂。 */
 import { createDetailContent } from './detail.js';
-import { TIME_FORMAT, dateKeyOf, extractNotices, fileCacheKey, findAtToken, findHashToken, formatClock, formatFileReference, formatProjectTag, hasTagMarkup, isRecord, messageOf, normalizeChatErrors, normalizeChatSkipped, normalizeFileSuggestions, normalizeFiles, normalizePriority, normalizeProject, normalizeProjectInput, normalizeProjectSuggestions, normalizeProjects, normalizeSearch, normalizeStats, normalizeTitleInput, normalizeTodo, normalizeTodos, normalizeType, normalizeWorkspaces, notifyText, projectCacheKey, projectLabel, pruneIdMap, request, todoMatchesSearch } from './helpers.js';
+import { MAX_ESTIMATE_MINUTES, TIME_FORMAT, dateKeyOf, extractNotices, fileCacheKey, findAtToken, findHashToken, formatClock, formatEstimate, formatFileReference, formatProjectTag, hasTagMarkup, isRecord, messageOf, normalizeChatErrors, normalizeChatSkipped, normalizeEstimate, normalizeFileSuggestions, normalizeFiles, normalizePriority, normalizeProject, normalizeProjectInput, normalizeProjectSuggestions, normalizeProjects, normalizeSearch, normalizeStats, normalizeTitleInput, normalizeTodo, normalizeTodos, normalizeType, normalizeWorkspaces, notifyText, parseEstimateInput, projectCacheKey, projectLabel, pruneIdMap, request, todoMatchesSearch, toCount } from './helpers.js';
 import { t } from './i18n.js';
 import { React, h } from './runtime.js';
-import { BOARD_DENSITIES, BOARD_GROUPS, CALENDAR_BASES, FILTERS, GANTT_RANGES, PRIORITIES, PROJECT_FILTER_ALL, StyleSheet, TYPES, TYPE_FILTER_ALL, VIEWS, queryForView } from './styles.js';
+import { BOARD_DENSITIES, BOARD_GROUPS, CALENDAR_BASES, ESTIMATE_CUSTOM, ESTIMATE_PRESETS, FILTERS, GANTT_RANGES, INSIGHTS_SCOPES, PRIORITIES, PROJECT_FILTER_ALL, StyleSheet, TYPES, TYPE_FILTER_ALL, VIEWS, queryForView } from './styles.js';
 import { createBoardView } from './views/board.js';
 import { createCalendarView } from './views/calendar.js';
 import { renderGanttView } from './views/gantt.js';
+import { createInsightsView } from './views/insights.js';
 import { createTableView } from './views/table.js';
 import { TransferDialog, makeDownload, readFileText } from './transfer.js';
 import { ChatPanel, CheckButton, ErrorPlaceholder, FileChip, LoadingPlaceholder, ProjectPicker, SuggestionDropdown, TextPlaceholder, ToastIcon } from './widgets.js';
@@ -19,7 +20,7 @@ const EMPTY_SNAPSHOT = () => null;
 export /** 面板主体。所有请求与交互状态都在这里，接口异常不会抛到槽位。 */
 function TodoPanel() {
   const [todos, setTodos] = React.useState([]);
-  const [stats, setStats] = React.useState({ total: 0, pending: 0, completed: 0 });
+  const [stats, setStats] = React.useState({ total: 0, pending: 0, completed: 0, archived: 0 });
   const [timeFormat, setTimeFormat] = React.useState(TIME_FORMAT);
   const [listStatus, setListStatus] = React.useState('loading');
   const [listError, setListError] = React.useState('');
@@ -58,6 +59,11 @@ function TodoPanel() {
   const [newType, setNewType] = React.useState('');
   const [editingType, setEditingType] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState(null);
+  // 十七期：搁置清单是独立筛选；预计用时在「新建」与「行内编辑」各有一份草稿；
+  // 回顾视图有独立的范围档位（week / month / all）。
+  const [newEstimate, setNewEstimate] = React.useState({ value: null, custom: false, text: '', invalid: false });
+  const [editEstimate, setEditEstimate] = React.useState({ value: null, custom: false, text: '', invalid: false });
+  const [insightsScope, setInsightsScope] = React.useState('week');
   const [chatOpen, setChatOpen] = React.useState(false);
   // 十五期：页头「设置」入口展开的偏好卡（目前只有快速入口开关）。
   const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -262,9 +268,10 @@ function TodoPanel() {
     void loadList(query.filter, query.sortBy, query.direction, projectFilter);
   }, [view, filter, sortBy, direction, projectFilter, loadList]);
 
-  // 看板/甘特里「已进行 X」随时间推进：只在这两个视图下每 60 秒更新一次「现在」。
+  // 「已进行 X」「放了 N 天」「近 7 天」都依赖「现在」：在会显示时长的视图下每 60 秒推进一次。
+  // 回顾视图也算（它的范围起点与陈放天数都随当前时间变化），表格/日历不需要。
   React.useEffect(() => {
-    if (view !== 'board' && view !== 'gantt') return undefined;
+    if (view !== 'board' && view !== 'gantt' && view !== 'insights') return undefined;
     setNowMs(Date.now());
     const timer = setInterval(() => {
       setNowMs(Date.now());
@@ -320,6 +327,11 @@ function TodoPanel() {
     void fetchProjectSuggestions('');
   }, []);
 
+  // 搁置清单只有表格视图能显示：切到「搁置」时若当前不是表格，自动切回表格。
+  React.useEffect(() => {
+    if (filter === 'archived' && view !== 'table') setView('table');
+  }, [filter, view]);
+
   const isBusy = busyId !== null || creating;
 
   // 空态出口：当前有筛选/分类筛选时先清掉，否则聚焦新建输入框。
@@ -350,6 +362,11 @@ function TodoPanel() {
       if (createInputRef.current && typeof createInputRef.current.focus === 'function') createInputRef.current.focus();
       return;
     }
+    if (newEstimate.invalid) {
+      showNotice('error', t('estimate.invalid'));
+      return;
+    }
+    const estimateMinutes = normalizeEstimate(newEstimate.value);
     closeFileSuggest();
     setCreating(true);
     try {
@@ -360,6 +377,8 @@ function TodoPanel() {
         // 显式 !优先级 / ^类型 标记优先；没有标记时用表单选择器（与服务端 parse > body 的规则一致）。
         if (newPriority !== '') body.priority = normalizePriority(newPriority);
         if (newType !== '') body.type = normalizeType(newType);
+        // 表单选择器是「没有 ~标记时」的兜底，与 priority / type 的规则一致。
+        if (estimateMinutes !== null) body.estimateMinutes = estimateMinutes;
         const value = await request('/quick-add', body);
         if (!mountedRef.current) return;
         const created = Array.isArray(value && value.created)
@@ -383,6 +402,7 @@ function TodoPanel() {
         setNewTitle('');
         setNewProject('');
         setNewProjectCustom(false);
+        setNewEstimate({ value: null, custom: false, text: '', invalid: false });
         if (createInputRef.current && typeof createInputRef.current.focus === 'function') createInputRef.current.focus();
         if (created.length > 0) void fetchProjectSuggestions(workspaceRef.current, true);
         await reload(true);
@@ -394,6 +414,7 @@ function TodoPanel() {
         if (priority !== '') body.priority = priority;
         const type = normalizeType(newType);
         if (type !== '') body.type = type;
+        if (estimateMinutes !== null) body.estimateMinutes = estimateMinutes;
         const value = await request('/create', body);
         if (!mountedRef.current) return;
         setNewTitle('');
@@ -401,6 +422,7 @@ function TodoPanel() {
         setNewProjectCustom(false);
         setNewPriority('');
         setNewType('');
+        setNewEstimate({ value: null, custom: false, text: '', invalid: false });
         showNotice('success', notifyText(value, 'notice.created'));
         if (createInputRef.current && typeof createInputRef.current.focus === 'function') createInputRef.current.focus();
         void fetchProjectSuggestions(workspaceRef.current, true);
@@ -444,6 +466,7 @@ function TodoPanel() {
     setEditingProjectCustom(false);
     setEditingPriority('');
     setEditingType('');
+    setEditEstimate({ value: null, custom: false, text: '', invalid: false });
   };
 
   const startEdit = (todo) => {
@@ -455,6 +478,7 @@ function TodoPanel() {
     setEditingProjectCustom(false);
     setEditingPriority(normalizePriority(todo.priority));
     setEditingType(normalizeType(todo.type));
+    setEditEstimate({ value: normalizeEstimate(todo.estimateMinutes), custom: false, text: '', invalid: false });
   };
 
   const saveEdit = async (todo) => {
@@ -473,18 +497,24 @@ function TodoPanel() {
     }
     const priority = normalizePriority(editingPriority);
     const type = normalizeType(editingType);
+    if (editEstimate.invalid) {
+      showNotice('error', t('estimate.invalid'));
+      return;
+    }
+    const estimateMinutes = normalizeEstimate(editEstimate.value);
     if (
       title === todo.title &&
       project === normalizeProject(todo.project) &&
       priority === normalizePriority(todo.priority) &&
-      type === normalizeType(todo.type)
+      type === normalizeType(todo.type) &&
+      estimateMinutes === normalizeEstimate(todo.estimateMinutes)
     ) {
       cancelEdit();
       return;
     }
     setBusyId(todo.id);
     try {
-      await request('/update', { id: todo.id, title, project, priority, type });
+      await request('/update', { id: todo.id, title, project, priority, type, estimateMinutes });
       if (!mountedRef.current) return;
       cancelEdit();
       showNotice('success', t('notice.updated'));
@@ -527,6 +557,8 @@ function TodoPanel() {
         type: todo.type,
         createdAt: todo.createdAt,
         completedAt: todo.completedAt,
+        archivedAt: todo.archivedAt ?? null,
+        estimateMinutes: todo.estimateMinutes ?? null,
         updatedAt: todo.updatedAt,
       }]);
       await request('/import', { content, mode: 'merge' });
@@ -536,6 +568,50 @@ function TodoPanel() {
       await reload(true);
     } catch (error) {
       showNotice('error', messageOf(error));
+    }
+  };
+
+  /**
+   * 搁置 / 取回：两个动作互为撤销（搁置后的 toast 给「取回」，取回后的给「搁置」），
+   * 与删除的撤销共用同一套提示条与静默刷新路径。
+   */
+  const handleArchive = async (todo) => {
+    if (todo === null || todo === undefined || busyId !== null) return;
+    setBusyId(todo.id);
+    try {
+      await request('/archive', { id: todo.id });
+      if (!mountedRef.current) return;
+      setTableActionsId(null);
+      showNotice('success', t('toast.archived', { title: todo.title === '' ? t('board.untitled') : todo.title }), {
+        onClick: () => {
+          void handleUnarchive(todo);
+        },
+      });
+      await reload(true);
+    } catch (error) {
+      showNotice('error', t('toast.archiveFailed', { message: messageOf(error) }));
+    } finally {
+      if (mountedRef.current) setBusyId(null);
+    }
+  };
+
+  const handleUnarchive = async (todo) => {
+    if (todo === null || todo === undefined || busyId !== null) return;
+    setBusyId(todo.id);
+    try {
+      await request('/unarchive', { id: todo.id });
+      if (!mountedRef.current) return;
+      setTableActionsId(null);
+      showNotice('success', t('toast.unarchived', { title: todo.title === '' ? t('board.untitled') : todo.title }), {
+        onClick: () => {
+          void handleArchive(todo);
+        },
+      });
+      await reload(true);
+    } catch (error) {
+      showNotice('error', t('toast.unarchiveFailed', { message: messageOf(error) }));
+    } finally {
+      if (mountedRef.current) setBusyId(null);
     }
   };
 
@@ -1098,6 +1174,84 @@ function TodoPanel() {
       )
     );
 
+  /**
+   * 预计用时选择器（新建 / 行内编辑 / 甘特行内编辑共用）。
+   *
+   * `kind` 决定读哪一份草稿：`'new'` 是新建表单，`'edit'` 是行内编辑。草稿里同时
+   * 保存「预设档位」与「自定义数字输入」两种形态，选「自定义…」时切换成 number 输入；
+   * 非法输入只做行内提示，不写进草稿值，因此不会提交。
+   */
+  const renderEstimateControl = (kind, disabled) => {
+    const state = kind === 'new' ? newEstimate : editEstimate;
+    const setState = kind === 'new' ? setNewEstimate : setEditEstimate;
+    const label = t('estimate.label');
+    if (state.custom) {
+      return h(
+        'label',
+        { className: 'ttl-select ttl-estimate-select' },
+        h('span', null, label),
+        h('input', {
+          className: 'ttl-input ttl-estimate-custom',
+          type: 'number',
+          min: 1,
+          max: MAX_ESTIMATE_MINUTES,
+          inputMode: 'numeric',
+          value: state.text,
+          placeholder: t('estimate.customPlaceholder'),
+          'aria-label': t('estimate.aria'),
+          'aria-invalid': state.invalid ? 'true' : 'false',
+          disabled,
+          onChange: (event) => {
+            const text = event.target.value;
+            const parsed = parseEstimateInput(text);
+            setState({ value: parsed.ok ? parsed.minutes : state.value, custom: true, text, invalid: !parsed.ok });
+          },
+          onBlur: () => {
+            if (state.text.trim() === '') setState({ value: null, custom: false, text: '', invalid: false });
+          },
+          onKeyDown: (event) => {
+            if (event && event.key === 'Enter') {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          },
+        }),
+        state.invalid
+          ? h('span', { className: 'ttl-estimate-error', role: 'status' }, t('estimate.invalid'))
+          : null
+      );
+    }
+    const value = normalizeEstimate(state.value);
+    const presetValues = ESTIMATE_PRESETS.filter((entry) => entry.value !== '').map((entry) => Number(entry.value));
+    const customValue = value !== null && !presetValues.includes(value);
+    return h(
+      'label',
+      { className: 'ttl-select ttl-estimate-select' },
+      h('span', null, label),
+      h(
+        'select',
+        {
+          value: value === null ? '' : String(value),
+          'aria-label': t('estimate.aria'),
+          disabled,
+          onChange: (event) => {
+            const next = event.target.value;
+            if (next === ESTIMATE_CUSTOM) {
+              setState({ value, custom: true, text: value === null ? '' : String(value), invalid: false });
+              return;
+            }
+            setState({ value: next === '' ? null : Number(next), custom: false, text: '', invalid: false });
+          },
+        },
+        ESTIMATE_PRESETS.map((entry) =>
+          h('option', { key: entry.value === '' ? 'none' : entry.value, value: entry.value }, t(entry.labelKey))
+        ),
+        customValue ? h('option', { key: 'current', value: String(value) }, formatEstimate(value)) : null,
+        h('option', { key: 'custom', value: ESTIMATE_CUSTOM }, t('estimate.custom'))
+      )
+    );
+  };
+
   const titleInput = (todo) =>
     h('input', {
       className: 'ttl-input ttl-edit-input',
@@ -1646,15 +1800,19 @@ function TodoPanel() {
     filter,
     ganttCollapsedProjects,
     ganttExpandedIds,
+    handleArchive,
     handleColumnAdd,
     handleDelete,
     handleEmptyAction,
+    handleUnarchive,
     handleHeaderSort,
     handleLaneAdd,
     handleMoveProject,
     handleSetPriority,
     handleSetType,
     handleToggle,
+    includeArchivedCount: stats.archived,
+    insightsScope,
     isBusy,
     listStatus,
     nowMs,
@@ -1665,6 +1823,7 @@ function TodoPanel() {
     range,
     renderActionButtons,
     renderDetailContent,
+    renderEstimateControl,
     renderFileChips,
     renderRowCheck,
     saveEdit,
@@ -1675,6 +1834,7 @@ function TodoPanel() {
     setConfirmId,
     setEditingPriority,
     setEditingType,
+    setInsightsScope,
     setTableActionsId,
     sortBy,
     startEdit,
@@ -1691,6 +1851,7 @@ function TodoPanel() {
   const renderTableView = createTableView(viewDeps);
   const renderBoardView = createBoardView(viewDeps);
   const renderCalendarView = createCalendarView(viewDeps);
+  const renderInsightsView = createInsightsView(viewDeps);
 
   let listBody;
   if (listStatus === 'loading' && todos.length === 0) {
@@ -1716,6 +1877,15 @@ function TodoPanel() {
       actionKey: 'list.clearFilterAction',
       onAction: handleEmptyAction,
     });
+  } else if (filter === 'archived' && visibleTodos.length === 0) {
+    listBody = h(TextPlaceholder, {
+      titleKey: 'list.emptyArchived',
+      hintKey: 'list.emptyArchivedHint',
+      actionKey: 'list.clearFilterAction',
+      onAction: handleEmptyAction,
+    });
+  } else if (view === 'insights') {
+    listBody = renderInsightsView();
   } else if (view === 'gantt') {
     listBody = renderGanttView(viewDeps);
   } else if (view === 'board') {
@@ -1728,12 +1898,27 @@ function TodoPanel() {
   // 计数与筛选同口径：分类筛选生效时用该分类的统计（/list 的 projects 汇总
   // 始终按全量数据计算）；该分类一条待办都没有时 projects[] 里没有条目，
   // 此时计数必须是 0，不能回落到全局 stats，避免「计数 4、行数 0」的错位。
+  // 搁置清单是独立筛选（只有表格视图能呈现），三处（计数 / 视图按钮 / 列表说明）共用这一个判断。
+  const archivedFiltered = filter === 'archived';
   const scopedProject = projectFiltered ? projects.find((item) => item.name === projectFilter) || null : null;
-  const filterCounts = scopedProject
-    ? { all: scopedProject.count, pending: scopedProject.pending, completed: scopedProject.completed }
-    : projectFiltered
-      ? { all: 0, pending: 0, completed: 0 }
-      : { all: stats.total, pending: stats.pending, completed: stats.completed };
+  // 搁置清单下 /list 只返回搁置条目（stats 的 total/pending/completed 是活跃口径，恒与行数不符），
+  // 因此计数直接用「当前返回的搁置条目数」：这就是这一屏真正的条数，不会出现「计数 0、行数 3」。
+  const filterCounts = archivedFiltered
+    // 搁置清单只显示搁置条目：把「未完成 / 已完成」置 0、只让「搁置」带数。
+    // 否则「未完成 1 / 已完成 0 / 搁置 1」并列会让人误以为这是三个独立分组。
+    ? { all: todos.length, pending: 0, completed: 0, archived: todos.length }
+    : scopedProject
+      ? {
+          all: scopedProject.count,
+          pending: scopedProject.pending,
+          completed: scopedProject.completed,
+          // 分类筛选下也要给出该分类的搁置数（/list 的 projects[] 带 archived 分项），
+          // 不能再硬编码 0 —— 那会让「搁置 0」和点进去的真实条数互相矛盾。
+          archived: toCount(scopedProject.archived, 0),
+        }
+      : projectFiltered
+        ? { all: 0, pending: 0, completed: 0, archived: 0 }
+        : { all: stats.total, pending: stats.pending, completed: stats.completed, archived: stats.archived };
   const filterTabs = h(
     'div',
     { className: 'ttl-seg', role: 'group', 'aria-label': t('filter.label') },
@@ -1753,6 +1938,7 @@ function TodoPanel() {
     )
   );
 
+  // 搁置清单只有表格视图能呈现：其它视图按钮禁用并说明原因（不用 tooltip-only，可读）。
   const viewToggle = h(
     'div',
     { className: 'ttl-seg', role: 'group', 'aria-label': t('view.aria') },
@@ -1764,6 +1950,8 @@ function TodoPanel() {
           type: 'button',
           className: 'ttl-seg-item',
           'aria-pressed': view === entry.value ? 'true' : 'false',
+          disabled: archivedFiltered && entry.value !== 'table',
+          title: archivedFiltered && entry.value !== 'table' ? t('archive.viewTableOnly') : undefined,
           onClick: () => setView(entry.value),
         },
         t(entry.labelKey)
@@ -1835,6 +2023,24 @@ function TodoPanel() {
       },
       GANTT_RANGES.map((entry) =>
         h('option', { key: entry.value, value: entry.value }, t(entry.labelKey))
+      )
+    )
+  );
+
+  const insightsScopeSelect = h(
+    'div',
+    { className: 'ttl-seg', role: 'group', 'aria-label': t('insights.scopeAria') },
+    INSIGHTS_SCOPES.map((entry) =>
+      h(
+        'button',
+        {
+          key: entry.value,
+          type: 'button',
+          className: 'ttl-seg-item',
+          'aria-pressed': insightsScope === entry.value ? 'true' : 'false',
+          onClick: () => setInsightsScope(entry.value),
+        },
+        t(entry.labelKey)
       )
     )
   );
@@ -2145,7 +2351,9 @@ function TodoPanel() {
             })
           : h(
               'form',
-              { className: 'ttl-composer', onSubmit: handleCreate, 'aria-label': t('create.aria') },
+              // noValidate：预计用时的自定义数字框自带 min/max，浏览器原生校验会在 submit
+              // 之前把提交拦掉，应用内的行内提示（role=status）就永远走不到。统一由 handleCreate 校验。
+              { className: 'ttl-composer', onSubmit: handleCreate, noValidate: true, 'aria-label': t('create.aria') },
               h('input', {
                 ref: createInputRef,
                 className: 'ttl-composer-input',
@@ -2192,6 +2400,7 @@ function TodoPanel() {
               }),
               prioritySelectControl(newPriority, setNewPriority, creating),
               typeSelectControl(newType, setNewType, creating),
+              renderEstimateControl('new', creating),
               h(
                 'button',
                 {
@@ -2244,7 +2453,9 @@ function TodoPanel() {
               h(
                 'div',
                 { className: 'ttl-group' },
-                view === 'table'
+                view === 'insights'
+                  ? insightsScopeSelect
+                  : view === 'table'
                   ? filterTabs
                   : view === 'board'
                     ? h(React.Fragment, null, boardGroupSelect, densitySelect, filterTabs)
@@ -2255,7 +2466,12 @@ function TodoPanel() {
               h('div', { className: 'ttl-group' }, projectFilterSelect, typeFilterSelect)
             )
           ),
-          h('div', { className: 'ttl-list' }, listBody)
+          h(
+            'div',
+            { className: 'ttl-list' },
+            archivedFiltered ? h('p', { className: 'ttl-archived-hint' }, t('archive.hint')) : null,
+            listBody
+          )
         )
       )
     ),

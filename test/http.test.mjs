@@ -251,6 +251,117 @@ try {
   for (const todo of quickTypeCreated) await post('delete', { id: todo.id });
   await post('delete', { id: bugTaskId });
 
+
+  // v6: 搁置 / 取回 + 预计用时
+  const estimateTask = await post('create', { title: '带预计的任务', estimateMinutes: 30 });
+  check('create with estimate', estimateTask.body.value?.todo?.estimateMinutes === 30, estimateTask.body.value?.todo);
+  const estimateTaskId = estimateTask.body.value?.todo?.id;
+  const invalidEstimate = await post('create', { title: 'x', estimateMinutes: 0 });
+  check('invalid estimate 400', invalidEstimate.status === 400, invalidEstimate.status);
+  check('invalid estimate code', invalidEstimate.body.error?.code === 'ESTIMATE_INVALID', invalidEstimate.body);
+  const oversizedEstimate = await post('update', { id: estimateTaskId, estimateMinutes: 5000 });
+  check('update invalid estimate 400', oversizedEstimate.status === 400, oversizedEstimate.status);
+  check('update invalid estimate code', oversizedEstimate.body.error?.code === 'ESTIMATE_INVALID', oversizedEstimate.body);
+  const clearedEstimate = await post('update', { id: estimateTaskId, estimateMinutes: null });
+  check('update null clears estimate', clearedEstimate.body.value?.todo?.estimateMinutes === null, clearedEstimate.body.value?.todo);
+  const restoredEstimate = await post('update', { id: estimateTaskId, estimateMinutes: 45 });
+  check('update sets estimate', restoredEstimate.body.value?.todo?.estimateMinutes === 45, restoredEstimate.body.value?.todo);
+
+  // archive / unarchive over HTTP
+  const archiveResponse = await post('archive', { id: estimateTaskId });
+  check('archive 200', archiveResponse.status === 200 && archiveResponse.body.ok === true, archiveResponse.body);
+  check('archive sets archivedAt', archiveResponse.body.value?.todo?.archivedAt !== null, archiveResponse.body.value?.todo);
+  const archiveAgain = await post('archive', { id: estimateTaskId });
+  check('duplicate archive 409', archiveAgain.status === 409, archiveAgain.status);
+  check('duplicate archive code', archiveAgain.body.error?.code === 'ALREADY_ARCHIVED', archiveAgain.body);
+  const archivedList = await post('list', { filter: 'archived' });
+  check(
+    'list archived filter sees the shelved todo',
+    archivedList.body.value?.todos?.some((todo) => todo.id === estimateTaskId),
+    archivedList.body.value?.todos,
+  );
+  check('archived stats counts it', archivedList.body.value?.stats?.archived >= 1, archivedList.body.value?.stats);
+  const activeAfterArchive = await post('list', { filter: 'all' });
+  check(
+    'all filter hides the shelved todo',
+    !activeAfterArchive.body.value?.todos?.some((todo) => todo.id === estimateTaskId),
+    activeAfterArchive.body.value?.todos,
+  );
+  const unarchiveResponse = await post('unarchive', { id: estimateTaskId });
+  check('unarchive 200', unarchiveResponse.status === 200, unarchiveResponse.body);
+  check('unarchive clears archivedAt', unarchiveResponse.body.value?.todo?.archivedAt === null, unarchiveResponse.body.value?.todo);
+  const unarchiveAgain = await post('unarchive', { id: estimateTaskId });
+  check('unarchive when not shelved 409', unarchiveAgain.status === 409, unarchiveAgain.status);
+  check('unarchive when not shelved code', unarchiveAgain.body.error?.code === 'NOT_ARCHIVED', unarchiveAgain.body);
+  const completedThenArchived = await post('create', { title: '已完成再搁置' });
+  const completedThenArchivedId = completedThenArchived.body.value?.todo?.id;
+  await post('complete', { id: completedThenArchivedId });
+  const archiveCompleted = await post('archive', { id: completedThenArchivedId });
+  check('archive a completed todo 400', archiveCompleted.status === 400, archiveCompleted.status);
+  check('archive a completed todo code', archiveCompleted.body.error?.code === 'ARCHIVE_INVALID', archiveCompleted.body);
+  await post('delete', { id: completedThenArchivedId });
+  const archiveMissing = await post('archive', { id: 'missing' });
+  check('archive unknown id 404', archiveMissing.status === 404, archiveMissing.status);
+
+  // completing a shelved todo clears the shelved state over HTTP too
+  const shelvedCreate = await post('create', { title: '搁置后完成' });
+  const shelvedId = shelvedCreate.body.value?.todo?.id;
+  await post('archive', { id: shelvedId });
+  const completedShelved = await post('complete', { id: shelvedId });
+  check(
+    'completing a shelved todo clears archivedAt',
+    completedShelved.body.value?.todo?.archivedAt === null, completedShelved.body.value?.todo,
+  );
+  check(
+    'completing a shelved todo reports it',
+    String(completedShelved.body.value?.notices ?? []).includes('已从搁置清单完成'),
+    completedShelved.body.value?.notices,
+  );
+  await post('delete', { id: shelvedId });
+
+  // sortBy=estimateMinutes over HTTP (未填 last)
+  const estimateSortList = await post('list', { sortBy: 'estimateMinutes', direction: 'asc' });
+  check('sortBy estimateMinutes accepted', estimateSortList.body.value?.sortBy === 'estimateMinutes', estimateSortList.body.value?.sortBy);
+  check(
+    'sortBy estimateMinutes puts 未填 last',
+    estimateSortList.body.value?.todos?.at(-1)?.estimateMinutes === null,
+    estimateSortList.body.value?.todos?.map((todo) => todo.estimateMinutes),
+  );
+  await post('delete', { id: estimateTaskId });
+
+  // /quick-add estimate fallback: a `~` marker wins, the body value is the fallback
+  const quickEstimateFallback = await post('quick-add', { text: '写周报', estimateMinutes: 45 });
+  const quickEstimateFallbackTodo = quickEstimateFallback.body.value?.created?.[0];
+  check(
+    'quick-add body estimate is the fallback',
+    quickEstimateFallbackTodo?.estimateMinutes === 45,
+    quickEstimateFallbackTodo,
+  );
+  const quickEstimateMarker = await post('quick-add', { text: '写周报 ~20m', estimateMinutes: 45 });
+  const quickEstimateMarkerTodo = quickEstimateMarker.body.value?.created?.[0];
+  check(
+    'quick-add marker beats the body estimate',
+    quickEstimateMarkerTodo?.estimateMinutes === 20
+      && quickEstimateMarkerTodo?.title === '写周报',
+    quickEstimateMarkerTodo,
+  );
+  const quickEstimateNone = await post('quick-add', { text: '写周报' });
+  check(
+    'quick-add without any estimate stays null',
+    quickEstimateNone.body.value?.created?.[0]?.estimateMinutes === null,
+    quickEstimateNone.body.value?.created?.[0],
+  );
+  const quickEstimateInvalid = await post('quick-add', { text: '写周报', estimateMinutes: 0 });
+  check('quick-add invalid fallback is ignored, not a 400', quickEstimateInvalid.status === 200, quickEstimateInvalid.status);
+  check(
+    'quick-add invalid fallback falls back to null',
+    quickEstimateInvalid.body.value?.created?.[0]?.estimateMinutes === null,
+    quickEstimateInvalid.body.value?.created?.[0],
+  );
+  for (const response of [quickEstimateFallback, quickEstimateMarker, quickEstimateNone, quickEstimateInvalid]) {
+    for (const todo of response.body.value?.created ?? []) await post('delete', { id: todo.id });
+  }
+
   // markers in a plain /create title are parsed instead of polluting the title
   const markerCreate = await post('create', { title: '测试 #lib', project: '' });
   check('create strips #marker from title', markerCreate.body.value?.todo?.title === '测试', markerCreate.body.value?.todo);

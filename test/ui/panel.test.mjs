@@ -2,7 +2,7 @@
  * UI 渲染验收 harness（进仓库版）：在 jsdom 里真实挂载 lib/client.js 构建产物，
  * 用真实 react@18.3 + react-dom@18.3 渲染「待办时间日志」面板，断言首屏 DOM。
  *
- * 覆盖：页头 / 新建输入框 / 四个视图分段 / 筛选计数 / 表格两行 / 空态 / 错误态与
+ * 覆盖：页头 / 新建输入框 / 五个视图分段 / 筛选计数 / 表格两行 / 空态 / 错误态与
  * 重试 / 看板视图切换 / 已完成徽标。网络层全 mock（mock globalThis.fetch），
  * 不发真实 HTTP 请求，也不依赖 Host、浏览器或截图。
  *
@@ -13,8 +13,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { after, before, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import React from 'react';
-import { createRoot } from 'react-dom/client';
-import * as ReactDOMTestUtils from 'react-dom/test-utils';
+// react-dom 与 react 都必须在 jsdom 全局装好之后再加载（见 before() 里的动态 import）：
+// 两者模块求值时都用 `canUseDOM` 决定事件系统走真实 input 事件还是 IE 的
+// propertychange/attachEvent 兜底。若在此处静态 import，会在 installDom() 之前求值，
+// 于是受控 input 的 onChange 永远收不到（输入后按钮一直是 disabled）。
+// quick.test.mjs 早已踩过同一个坑并做了同样的惰性加载。
+let createRoot = null;
+let act = null;
 
 /** 构建产物：lib/client.js（浏览器模块，ESM 求值时会调用 window.__ModuleLoader__.load）。 */
 const CLIENT_ENTRY = fileURLToPath(new URL('../../lib/client.js', import.meta.url));
@@ -30,6 +35,8 @@ const TODO_PENDING = {
   files: ['docs/report.md'],
   priority: 'high',
   type: 'chore',
+  archivedAt: null,
+  estimateMinutes: null,
   status: 'pending',
   createdAt: CREATED_AT,
   completedAt: null,
@@ -42,17 +49,33 @@ const TODO_COMPLETED = {
   files: [],
   priority: '',
   type: 'bug',
+  archivedAt: null,
+  estimateMinutes: null,
   status: 'completed',
   createdAt: CREATED_AT,
   completedAt: COMPLETED_AT,
   updatedAt: COMPLETED_AT,
+};
+/** 已搁置条目：只出现在 filter:'archived' 的结果里。 */
+const TODO_ARCHIVED = {
+  id: 'todo-archived',
+  title: '重构 store',
+  project: '工作',
+  files: [],
+  priority: 'low',
+  type: 'improvement',
+  status: 'pending',
+  createdAt: '2026-10-20T09:00:00+08:00',
+  completedAt: null,
+  archivedAt: '2026-11-01T09:00:00+08:00',
+  estimateMinutes: null,
+  updatedAt: '2026-11-01T09:00:00+08:00',
 };
 const PROJECT_SUGGESTIONS = [
   { name: '工作', source: 'used', count: 2 },
   { name: 'docs', source: 'folder', count: 1 },
 ];
 
-const act = typeof React.act === 'function' ? React.act : ReactDOMTestUtils.act;
 
 let dom = null;
 let savedGlobals = {};
@@ -185,12 +208,20 @@ const failReply = (status, code, message) => ({
 
 /** /list 的成功响应：todos / stats / projects / timeFormat 与 Host 契约一致。 */
 function listValue(body = {}) {
-  const all = [TODO_PENDING, TODO_COMPLETED];
-  const filter = body.filter === 'pending' || body.filter === 'completed' ? body.filter : 'all';
-  const todos = filter === 'all' ? all : all.filter((todo) => todo.status === filter);
+  const active = [TODO_PENDING, TODO_COMPLETED];
+  const filter =
+    body.filter === 'pending' || body.filter === 'completed' || body.filter === 'archived'
+      ? body.filter
+      : 'all';
+  const todos =
+    filter === 'archived'
+      ? [TODO_ARCHIVED]
+      : filter === 'all'
+        ? active
+        : active.filter((todo) => todo.status === filter);
   return {
     todos,
-    stats: { total: 2, pending: 1, completed: 1 },
+    stats: { total: 2, pending: 1, completed: 1, archived: 1 },
     projects: [
       { name: '工作', count: 2, pending: 1, completed: 1 },
       { name: '', count: 0, pending: 0, completed: 0 },
@@ -368,15 +399,41 @@ const textsOf = (nodes) => [...nodes].map(textOf);
 const isTime = (text) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text);
 //#endregion
 
-before(() => {
+/** 用原生 setter 写受控 input 的值（React 18 在 jsdom 里需要这一步才触发 onChange）。 */
+async function typeInto(input, text) {
+  const proto = globalThis.window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  await act(async () => {
+    setter.call(input, text);
+    input.dispatchEvent(new globalThis.window.Event('input', { bubbles: true }));
+  });
+  await settle();
+}
+
+/** 选择原生 select 的值并触发 change。 */
+async function chooseOption(select, value) {
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new globalThis.window.Event('change', { bubbles: true }));
+  });
+  await settle();
+}
+
+
+before(async () => {
   installDom();
+  // 见文件头说明：先装好 jsdom，再加载 react-dom。
+  const client = await import('react-dom/client');
+  const testUtils = await import('react-dom/test-utils');
+  createRoot = client.createRoot;
+  act = typeof React.act === 'function' ? React.act : testUtils.act;
 });
 
 after(() => {
   restoreDom();
 });
 
-test('a+b+f. 页头、新建框、四视图分段、筛选计数与两行表格（含已完成徽标）', async () => {
+test('a+b+f. 页头、新建框、五视图分段、筛选计数与两行表格（含已完成徽标）', async () => {
   await withPanel(defaultHandler(), async ({ container, calls, click }) => {
     // a. 页头：标题与「timeFormat 来自 /list」的副标题
     const root = container.querySelector('.ttl-root');
@@ -394,25 +451,25 @@ test('a+b+f. 页头、新建框、四视图分段、筛选计数与两行表格�
     assert.equal(input.getAttribute('placeholder'), '输入待办；可写 #分类 @文件，Enter 创建');
     assert.equal(input.getAttribute('aria-label'), '新建待办');
 
-    // a. 四个视图分段
+    // a. 五个视图分段
     const viewSeg = [...container.querySelectorAll('.ttl-seg')].find((seg) =>
       [...seg.querySelectorAll('button')].some((button) => textOf(button) === '看板')
     );
     assert.ok(viewSeg, '应渲染视图分段控件');
-    assert.deepEqual(textsOf(viewSeg.querySelectorAll('button')), ['表格', '看板', '甘特图', '日历']);
+    assert.deepEqual(textsOf(viewSeg.querySelectorAll('button')), ['表格', '看板', '甘特图', '日历', '回顾']);
     const activeView = viewSeg.querySelector('button[aria-pressed="true"]');
     assert.equal(textOf(activeView), '表格', '默认视图应为表格');
 
     // a. 筛选分段与计数（stats.total/pending/completed）
     assert.deepEqual(
       textsOf(container.querySelectorAll('.ttl-seg-count')),
-      ['2', '1', '1'],
-      '筛选计数应来自 /list 的 stats'
+      ['2', '1', '1', '1'],
+      '筛选计数应来自 /list 的 stats（含搁置）'
     );
     const filterLabels = [...container.querySelectorAll('.ttl-seg')]
       .filter((seg) => seg !== viewSeg)
       .flatMap((seg) => [...seg.querySelectorAll('button')].map((button) => textOf(button).replace(/\d+$/, '')));
-    assert.deepEqual(filterLabels.slice(0, 3), ['全部', '未完成', '已完成']);
+    assert.deepEqual(filterLabels.slice(0, 4), ['全部', '未完成', '已完成', '搁置']);
 
     // b. 表格视图两行待办
     const rows = [...container.querySelectorAll('.ttl-table-row')];
@@ -487,7 +544,7 @@ test('c. /list 返回空列表时渲染空态文案', async () => {
     assert.equal(textOf(container.querySelector('.ttl-placeholder-title')), '还没有待办');
     assert.equal(textOf(container.querySelector('.ttl-placeholder-hint')), '在上方输入内容来创建第一条待办。');
     assert.equal(findButton(container, '新建第一条待办') !== null, true, '空态应给出下一步按钮');
-    assert.deepEqual(textsOf(container.querySelectorAll('.ttl-seg-count')), ['0', '0', '0']);
+    assert.deepEqual(textsOf(container.querySelectorAll('.ttl-seg-count')), ['0', '0', '0', '0']);
   });
 });
 
@@ -725,7 +782,7 @@ test('j. 行尾 ⋯ 菜单：删除二次确认 + 撤销回插完整快照', asy
     await click(row.querySelector('.ttl-row-more'));
     let menu = row.querySelector('.ttl-row-menu');
     assert.ok(menu, '点 ⋯ 应展开行内菜单');
-    assert.deepEqual(textsOf(menu.querySelectorAll('button')), ['详情', '编辑', '删除']);
+    assert.deepEqual(textsOf(menu.querySelectorAll('button')), ['详情', '编辑', '搁置', '删除']);
 
     await click([...menu.querySelectorAll('button')].find((button) => textOf(button) === '删除'));
     menu = row.querySelector('.ttl-row-menu');
@@ -806,5 +863,206 @@ test('l. 导入对话框：有文件时遮罩与 Esc 不关闭，显式关闭仍
 
     await click(dialog.querySelector('.ttl-dialog-close'));
     assert.equal(container.querySelector('.ttl-dialog'), null, '显式关闭仍可用');
+  });
+});
+
+test('n. 预计用时：表格第三行显示预计与偏差，新建表单可带 estimateMinutes', async () => {
+  const handler = (action) => {
+    if (action === 'list') {
+      // 已完成：创建 09:05 → 完成 10:30 = 85 分钟，预计 60 分钟 → 超出 42%
+      return okReply({
+        ...listValue(),
+        todos: [
+          { ...TODO_COMPLETED, estimateMinutes: 60 },
+          { ...TODO_PENDING, estimateMinutes: 30 },
+        ],
+      });
+    }
+    return defaultHandler()(action);
+  };
+  await withPanel(handler, async ({ container, calls, click }) => {
+    const cells = [...container.querySelectorAll('.ttl-time-estimate')];
+    assert.equal(cells.length, 2, '两条待办都应显示预计用时');
+    assert.ok(textOf(cells[0]).startsWith('预计 1 小时'), '已完成行应显示预计时长');
+    assert.ok(textOf(cells[0]).includes('超出 42%'), '已完成行应显示超出比例');
+    assert.equal(cells[0].getAttribute('data-deviation'), 'over');
+    assert.equal(textOf(cells[1]), '预计 30 分钟', '未完成行只显示预计，不显示偏差');
+    assert.equal(cells[1].getAttribute('data-deviation'), 'none');
+
+    // 新建表单：选 30 分钟 → /create 带 estimateMinutes
+    const estimateSelect = [...container.querySelectorAll('select')].find((select) =>
+      [...select.options].some((option) => textOf(option) === '30 分钟')
+    );
+    assert.ok(estimateSelect, '新建表单应有预计用时选择器');
+    await chooseOption(estimateSelect, '30');
+    await typeInto(container.querySelector('.ttl-composer-input'), '写周报');
+    await click(findButton(container, '添加'));
+    const created = calls.filter((call) => call.action === 'create').pop();
+    assert.ok(created, '应请求 /create');
+    assert.equal(created.body.estimateMinutes, 30, '表单选择器应进入 create 请求体');
+  });
+});
+
+test('o. 搁置：行内「⋯ → 搁置」请求 /archive，toast 可一键取回', async () => {
+  await withPanel(defaultHandler(), async ({ container, click, calls }) => {
+    const row = container.querySelector('.ttl-table-row[data-status="pending"]');
+    await click(row.querySelector('.ttl-row-more'));
+    const menu = row.querySelector('.ttl-row-menu');
+    const shelve = [...menu.querySelectorAll('button')].find((button) => textOf(button) === '搁置');
+    assert.ok(shelve, '未完成行的菜单应有「搁置」');
+    await click(shelve);
+    assert.ok(
+      calls.some((call) => call.action === 'archive' && call.body.id === 'todo-pending'),
+      '应请求 /archive'
+    );
+    assert.ok(textOf(container.querySelector('.ttl-toast')).includes('已搁置'), 'toast 应说明已搁置');
+    const undo = findButton(container, '撤销');
+    assert.ok(undo, '搁置后应提供撤销');
+    await click(undo);
+    assert.ok(
+      calls.some((call) => call.action === 'unarchive' && call.body.id === 'todo-pending'),
+      '撤销应请求 /unarchive'
+    );
+  });
+});
+
+test('p. 搁置清单：只有表格视图可用，并给出「搁置 ≠ 删除」说明', async () => {
+  const handler = (action, body) => {
+    if (action === 'list') return okReply(listValue(body));
+    return defaultHandler()(action);
+  };
+  await withPanel(handler, async ({ container, click, calls }) => {
+    const filterSeg = [...container.querySelectorAll('.ttl-seg')].find((seg) =>
+      [...seg.querySelectorAll('button')].some((button) => textOf(button).startsWith('搁置'))
+    );
+    assert.ok(filterSeg, '筛选分段里应有「搁置」');
+    await click([...filterSeg.querySelectorAll('button')].find((button) => textOf(button).startsWith('搁置')));
+    const listCall = calls.filter((call) => call.action === 'list').pop();
+    assert.equal(listCall.body.filter, 'archived', '应带 filter: archived 重新拉取');
+    assert.ok(container.querySelector('.ttl-archived-hint'), '搁置清单应有中性说明');
+    assert.equal(container.querySelectorAll('.ttl-table-row').length, 1, '搁置清单应只列搁置条目');
+    // 计数必须与该屏实际行数一致（回归：曾用活跃口径的 stats，出现「计数 0、行数 1」）。
+    // 同时「未完成 / 已完成」在该筛选下置 0，只让「搁置」带数，避免误读成三个独立分组。
+    const archivedCounts = textsOf(container.querySelectorAll('.ttl-seg-count'));
+    assert.equal(archivedCounts[0], '1', '全部计数应等于当前搁置行数');
+    assert.equal(archivedCounts[1], '0', '搁置筛选下「未完成」不应带数');
+    assert.equal(archivedCounts[2], '0', '搁置筛选下「已完成」不应带数');
+    assert.equal(archivedCounts[3], '1', '搁置计数应等于当前搁置行数');
+    assert.ok(container.querySelector('.ttl-archived-badge'), '搁置行应带「已搁置」标记');
+    for (const label of ['看板', '甘特图', '日历', '回顾']) {
+      const button = findButton(container, label);
+      assert.equal(button.disabled, true, `搁置清单下「${label}」应禁用`);
+    }
+    assert.equal(findButton(container, '表格').disabled, false);
+  });
+});
+
+test('q. 回顾：四张数字卡、跨度排行、放得最久的与范围切换', async () => {
+  await withPanel(defaultHandler(), async ({ container, click, calls }) => {
+    await click(findButton(container, '回顾'));
+    const view = container.querySelector('.ttl-insights');
+    assert.ok(view, '应渲染回顾视图');
+    assert.equal(view.getAttribute('role'), 'region');
+
+    const scope = [...container.querySelectorAll('.ttl-toolbar-row .ttl-seg')].find((seg) =>
+      [...seg.querySelectorAll('button')].some((button) => textOf(button) === '近 7 天')
+    );
+    assert.ok(scope, '回顾范围切换应在工具栏');
+    assert.deepEqual(textsOf(scope.querySelectorAll('button')), ['近 7 天', '近 30 天', '全部']);
+
+    const cards = [...container.querySelectorAll('.ttl-insights-card')];
+    assert.equal(cards.length, 4, '应有四张数字卡');
+    assert.equal(textOf(cards[0].querySelector('.ttl-insights-card-label')), '完成条数');
+    // 夹具的完成时间是 2026-11-03，落在「近 7 天」之外 → 周范围应为 0。
+    assert.equal(textOf(cards[0].querySelector('.ttl-insights-card-value')), '0', '周范围内没有完成条目');
+    // 夹具都在「近 7 天」之外，所以周范围下两个排行与「放得最久的」都应是空态说明。
+    assert.equal(container.querySelectorAll('.ttl-insights-bar').length, 0, '周范围内没有跨度排行');
+    assert.equal(container.querySelectorAll('.ttl-insights-row').length, 0, '周范围内没有「放得最久的」');
+
+    // 切到「全部」后应把夹具算进来；范围切换只改本地状态，不重新请求 /list
+    const listCallsBefore = calls.filter((call) => call.action === 'list').length;
+    await click([...scope.querySelectorAll('button')].find((button) => textOf(button) === '全部'));
+    const allCards = [...container.querySelectorAll('.ttl-insights-card')];
+    assert.equal(textOf(allCards[0].querySelector('.ttl-insights-card-value')), '1', '全部范围应含 1 条已完成');
+    assert.ok(container.querySelectorAll('.ttl-insights-bar').length >= 1, '应有分类跨度排行');
+    const oldest = [...container.querySelectorAll('.ttl-insights-row')];
+    assert.equal(oldest.length, 1, '未完成条目应进入「放得最久的」');
+    assert.ok(textOf(oldest[0]).includes('放了'), '文案中性：放了 N 天');
+    assert.equal(
+      calls.filter((call) => call.action === 'list').length,
+      listCallsBefore,
+      '切换回顾范围不应重新请求 /list'
+    );
+  });
+});
+
+test('r. 表格与看板行内编辑都能改预计用时（三视图一致）', async () => {
+  const handler = (action) => {
+    if (action === 'list') {
+      return okReply({ ...listValue(), todos: [{ ...TODO_PENDING, estimateMinutes: 60 }] });
+    }
+    return defaultHandler()(action);
+  };
+  await withPanel(handler, async ({ container, click, calls }) => {
+    // 表格：⋯ → 编辑 → 状态列应出现「预计用时」选择器
+    const row = container.querySelector('.ttl-table-row');
+    await click(row.querySelector('.ttl-row-more'));
+    await click([...row.querySelectorAll('.ttl-row-menu-item')].find((b) => textOf(b) === '编辑'));
+    const labels = [...row.querySelectorAll('select')].map((select) => select.getAttribute('aria-label'));
+    assert.ok(labels.includes('预计用时'), `表格行内编辑应能改预计用时：${JSON.stringify(labels)}`);
+
+    // 改预计用时并保存 → /update 带 estimateMinutes
+    const estimateSelect = [...row.querySelectorAll('select')].find(
+      (select) => select.getAttribute('aria-label') === '预计用时'
+    );
+    await chooseOption(estimateSelect, '30');
+    await click([...row.querySelectorAll('button')].find((b) => textOf(b) === '保存'));
+    const update = calls.filter((call) => call.action === 'update').pop();
+    assert.ok(update, '保存应请求 /update');
+    assert.equal(update.body.estimateMinutes, 30, '表格行内编辑的预计用时必须提交');
+  });
+});
+
+test('s. 回顾视图受搜索与类型筛选约束，不会出现「筛选静默失效」', async () => {
+  const handler = (action, body) => {
+    if (action === 'list') {
+      return okReply({
+        ...listValue(body),
+        todos: [
+          { ...TODO_COMPLETED, type: 'bug', project: '工作' },
+          { ...TODO_PENDING, type: 'chore', project: '生活' },
+        ],
+      });
+    }
+    return defaultHandler()(action);
+  };
+  await withPanel(handler, async ({ container, click }) => {
+    // 进回顾视图（默认表格），范围保持默认「近 7 天」→ 先切「全部」再由卡片读数断言
+    await click(findButton(container, '回顾'));
+    const scope = [...container.querySelectorAll('.ttl-toolbar-row .ttl-seg')].find((seg) =>
+      [...seg.querySelectorAll('button')].some((button) => textOf(button) === '全部')
+    );
+    await click([...scope.querySelectorAll('button')].find((button) => textOf(button) === '全部'));
+    const cardValue = () => textOf(container.querySelectorAll('.ttl-insights-card-value')[0]);
+    assert.equal(cardValue(), '1', '全部范围下完成 1 条');
+
+    // 类型筛选 = 缺陷 → 只剩 bug 那条（它恰好已完成，计数仍是 1）
+    // 用工具栏的「类型筛选」（aria-label 是「类型筛选」），不是新建表单里的类型选择器
+    const typeSelect = [...container.querySelectorAll('select')].find(
+      (select) => select.getAttribute('aria-label') === '类型筛选'
+    );
+    assert.ok(typeSelect, '应有类型筛选');
+    await chooseOption(typeSelect, 'bug');
+    assert.equal(
+      container.querySelectorAll('.ttl-insights-row').length,
+      0,
+      '类型筛选后未完成的 chore 不应出现在回顾里'
+    );
+
+    // 搜索无命中 → 走统一的搜索空态，而不是把回顾整块留在页面上
+    await chooseOption(typeSelect, '__ttl_all_types__');
+    await typeInto(container.querySelector('.ttl-search input'), '不存在的关键词');
+    assert.ok(container.querySelector('.ttl-insights') === null, '搜索无命中时不应继续显示回顾内容');
+    assert.ok(textOf(container).includes('没有匹配'), '应给出搜索空态');
   });
 });

@@ -4,9 +4,9 @@ import { inspect } from 'node:util';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TodoStore, normalizeTodo, sortTodos, filterTodos, computeStats, validatePriority, validateType } from '../lib/store.js';
+import { TodoStore, normalizeTodo, sortTodos, filterTodos, computeStats, validatePriority, validateType, validateEstimate, MAX_ESTIMATE_MINUTES } from '../lib/store.js';
 import { formatLocalDateTime, toIsoString, parseTimestamp } from '../lib/time.js';
-import { executeTodoAction, resolveDataFile, decorateTodo, createTodoTool, buildProjectSuggestions, runQuickAdd, resolveCommandAttachmentFiles } from '../lib/index.js';
+import { executeTodoAction, resolveDataFile, decorateTodo, createTodoTool, buildProjectSuggestions, runQuickAdd, resolveCommandAttachmentFiles, renderTodoResult } from '../lib/index.js';
 
 // Registers each assertion as an independent `node:test` test so failures
 // are reported under the original descriptive name. Conditions and detail
@@ -132,7 +132,16 @@ check('sortTodos stable for equal keys', sortTodos([
 ], { sortBy: 'createdAt' }).map((t) => t.id).join('') === 'ab');
 check('computeStats', JSON.stringify(computeStats([
   { status: 'pending' }, { status: 'completed' }, { status: 'pending' },
-])) === JSON.stringify({ total: 3, pending: 2, completed: 1 }));
+])) === JSON.stringify({ total: 3, pending: 2, completed: 1, archived: 0 }));
+check(
+  'computeStats keeps shelved todos out of total',
+  JSON.stringify(computeStats([
+    { status: 'pending' }, { status: 'pending', archivedAt: '2026-01-01T00:00:00.000Z' },
+  ])) === JSON.stringify({ total: 1, pending: 1, completed: 0, archived: 1 }),
+  computeStats([
+    { status: 'pending' }, { status: 'pending', archivedAt: '2026-01-01T00:00:00.000Z' },
+  ]),
+);
 check('parseTimestamp invalid', parseTimestamp('x') === null);
 
 // repair notices are delivered to the reader exactly once
@@ -280,9 +289,10 @@ check('v1 migration notice', v1List.notices.some((n) => n.includes('版本 1')),
 await v1Store.create({ title: '触发写盘' });
 const v1Raw = JSON.parse(await fsp.readFile(v1File, 'utf8'));
 check(
-  'v1 persisted as version 5',
-  v1Raw.version === 5 && v1Raw.todos[0].project === '' && Array.isArray(v1Raw.todos[0].files)
-    && v1Raw.todos[0].priority === '' && v1Raw.todos[0].type === '',
+  'v1 persisted as version 6',
+  v1Raw.version === 6 && v1Raw.todos[0].project === '' && Array.isArray(v1Raw.todos[0].files)
+    && v1Raw.todos[0].priority === '' && v1Raw.todos[0].type === ''
+    && v1Raw.todos[0].archivedAt === null && v1Raw.todos[0].estimateMinutes === null,
   v1Raw,
 );
 await v1Store.dispose();
@@ -307,7 +317,7 @@ check('v2 record gains empty files', Array.isArray(v2List.todos[0].files) && v2L
 check('v2 migration notice', v2List.notices.some((n) => n.includes('版本 2')), v2List.notices);
 await v2Store.create({ title: '触发写盘' });
 const v2Raw = JSON.parse(await fsp.readFile(v2File, 'utf8'));
-check('v2 persisted as version 5', v2Raw.version === 5 && v2Raw.todos[0].priority === '' && v2Raw.todos[0].type === '', v2Raw);
+check('v2 persisted as version 6', v2Raw.version === 6 && v2Raw.todos[0].priority === '' && v2Raw.todos[0].type === '', v2Raw);
 await v2Store.dispose();
 
 // v3 envelope (no priority/type) migrates to v5: loading never rewrites, next write does
@@ -339,8 +349,8 @@ check('v3 load does not rewrite the file', (await fsp.readFile(v3File, 'utf8')) 
 await v3Store.create({ title: '触发写盘' });
 const v3Raw = JSON.parse(await fsp.readFile(v3File, 'utf8'));
 check(
-  'v3 persisted as version 5',
-  v3Raw.version === 5 && v3Raw.todos.find((todo) => todo.id === 'legacy-v3')?.priority === ''
+  'v3 persisted as version 6',
+  v3Raw.version === 6 && v3Raw.todos.find((todo) => todo.id === 'legacy-v3')?.priority === ''
     && v3Raw.todos.find((todo) => todo.id === 'legacy-v3')?.type === '',
   v3Raw.version,
 );
@@ -376,8 +386,8 @@ check('v4 load does not rewrite the file', (await fsp.readFile(v4File, 'utf8')) 
 await v4Store.create({ title: '触发写盘' });
 const v4Raw = JSON.parse(await fsp.readFile(v4File, 'utf8'));
 check(
-  'v4 persisted as version 5',
-  v4Raw.version === 5 && v4Raw.todos.find((todo) => todo.id === 'legacy-v4')?.type === ''
+  'v4 persisted as version 6',
+  v4Raw.version === 6 && v4Raw.todos.find((todo) => todo.id === 'legacy-v4')?.type === ''
     && v4Raw.todos.find((todo) => todo.id === 'legacy-v4')?.priority === 'high',
   v4Raw.version,
 );
@@ -409,8 +419,8 @@ check('create rejects invalid priority', prioBad.ok === false && prioBad.code ==
 check('create rejects non-string priority', (await priorityStore.create({ title: 'x', priority: 42 })).code === 'PRIORITY_INVALID');
 const priorityRaw = JSON.parse(await fsp.readFile(priorityFile, 'utf8'));
 check(
-  'priority persisted in the v5 envelope',
-  priorityRaw.version === 5 && priorityRaw.todos.find((todo) => todo.id === prioHigh.todo.id)?.priority === 'high',
+  'priority persisted in the v6 envelope',
+  priorityRaw.version === 6 && priorityRaw.todos.find((todo) => todo.id === prioHigh.todo.id)?.priority === 'high',
   priorityRaw.version,
 );
 const priorityDesc = await priorityStore.list({ sortBy: 'priority' });
@@ -526,8 +536,8 @@ check('create rejects invalid type', typeBad.ok === false && typeBad.code === 'T
 check('create rejects non-string type', (await typeStore.create({ title: 'x', type: 42 })).code === 'TYPE_INVALID');
 const typeRaw = JSON.parse(await fsp.readFile(typeFile, 'utf8'));
 check(
-  'type persisted in the v5 envelope',
-  typeRaw.version === 5 && typeRaw.todos.find((todo) => todo.id === typeBug.todo.id)?.type === 'bug',
+  'type persisted in the v6 envelope',
+  typeRaw.version === 6 && typeRaw.todos.find((todo) => todo.id === typeBug.todo.id)?.type === 'bug',
   typeRaw.version,
 );
 const typeUpdate = await typeStore.update(typeUnset.todo.id, { type: 'question' });
@@ -598,6 +608,424 @@ check(
 check('invalid type normalized on load', repairTypeFirst.todos[0].type === '', repairTypeFirst.todos[0]);
 await repairTypeStore.dispose();
 
+// ---- v6: 搁置 (archivedAt) + 预计用时 (estimateMinutes) ----
+
+// validateEstimate: undefined/null = 未填, an integer 1..1440 only
+check(
+  'estimate defaults to null when omitted',
+  validateEstimate(undefined).estimateMinutes === null && validateEstimate(null).estimateMinutes === null,
+);
+check(
+  'estimate accepts integers in range',
+  [1, 30, MAX_ESTIMATE_MINUTES].every((value) => {
+    const result = validateEstimate(value);
+    return result.ok === true && result.estimateMinutes === value;
+  }),
+);
+check('estimate accepts numeric strings', validateEstimate('45').estimateMinutes === 45);
+check('estimate rejects zero', validateEstimate(0).ok === false && validateEstimate(0).code === 'ESTIMATE_INVALID');
+check(
+  'estimate rejects out-of-range values',
+  validateEstimate(MAX_ESTIMATE_MINUTES + 1).code === 'ESTIMATE_INVALID',
+  validateEstimate(MAX_ESTIMATE_MINUTES + 1),
+);
+check('estimate rejects fractions', validateEstimate(1.5).code === 'ESTIMATE_INVALID');
+check('estimate rejects non-numeric strings', validateEstimate('半小时').code === 'ESTIMATE_INVALID');
+check('estimate rejects non-number types', validateEstimate({}).code === 'ESTIMATE_INVALID');
+
+// v5 data gains the two new fields and is persisted as v6 on the next write
+const v5File = path.join(dir, 'v5.json');
+const v5Payload = JSON.stringify({
+  version: 5,
+  todos: [{
+    id: 'legacy-v5',
+    title: '五期数据',
+    project: '工作',
+    files: ['src/a.ts'],
+    status: 'pending',
+    priority: 'high',
+    type: 'bug',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }],
+});
+await fsp.writeFile(v5File, v5Payload, 'utf8');
+const v5Store = new TodoStore({ dataFile: v5File, now: () => clock });
+await v5Store.load();
+const v5List = await v5Store.list({});
+check(
+  'v5 record loads with null archivedAt and estimateMinutes',
+  v5List.todos.length === 1
+    && v5List.todos[0].archivedAt === null
+    && v5List.todos[0].estimateMinutes === null,
+  v5List.todos,
+);
+check(
+  'v5 migration notice mentions the shelved and estimate fields',
+  v5List.notices.some((n) => n.includes('版本 5') && n.includes('搁置与预计用时')),
+  v5List.notices,
+);
+check('v5 load does not rewrite the file', (await fsp.readFile(v5File, 'utf8')) === v5Payload);
+await v5Store.create({ title: '触发写盘' });
+const v5Raw = JSON.parse(await fsp.readFile(v5File, 'utf8'));
+check(
+  'v5 persisted as version 6 with the new fields',
+  v5Raw.version === 6
+    && v5Raw.todos.find((todo) => todo.id === 'legacy-v5')?.archivedAt === null
+    && v5Raw.todos.find((todo) => todo.id === 'legacy-v5')?.estimateMinutes === null,
+  v5Raw.version,
+);
+await v5Store.dispose();
+
+// a v6 file round-trips both new fields unchanged
+const v6File = path.join(dir, 'v6.json');
+await fsp.writeFile(v6File, JSON.stringify({
+  version: 6,
+  todos: [{
+    id: 'v6-archived',
+    title: '六期搁置数据',
+    project: '工作',
+    files: [],
+    status: 'pending',
+    priority: '',
+    type: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    archivedAt: '2026-01-02T00:00:00.000Z',
+    estimateMinutes: 90,
+    updatedAt: '2026-01-02T00:00:00.000Z',
+  }],
+}), 'utf8');
+const v6Store = new TodoStore({ dataFile: v6File, now: () => clock });
+await v6Store.load();
+const v6List = await v6Store.list({ filter: 'archived' });
+check(
+  'v6 record keeps archivedAt and estimateMinutes',
+  v6List.todos.length === 1
+    && v6List.todos[0].archivedAt === '2026-01-02T00:00:00.000Z'
+    && v6List.todos[0].estimateMinutes === 90,
+  v6List.todos,
+);
+await v6Store.dispose();
+
+// repairs: completed record carrying archivedAt, and an invalid estimate
+const repairedCompleted = normalizeTodo(
+  {
+    id: 'fix-archived',
+    title: '已完成却带搁置时间',
+    status: 'completed',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: '2026-01-02T00:00:00.000Z',
+    archivedAt: '2026-01-02T00:00:00.000Z',
+  },
+  { now: clock },
+);
+check(
+  'completed record with archivedAt is repaired',
+  repairedCompleted.todo.archivedAt === null
+    && repairedCompleted.notices.some((n) => n.includes('搁置时间')),
+  repairedCompleted,
+);
+const invalidEstimate = normalizeTodo(
+  { id: 'fix-estimate', title: '预计用时非法', estimateMinutes: 5000, createdAt: '2026-01-01T00:00:00.000Z' },
+  { now: clock },
+);
+check(
+  'invalid estimate is cleared with a notice',
+  invalidEstimate.todo.estimateMinutes === null
+    && invalidEstimate.notices.some((n) => n.includes('预计用时')),
+  invalidEstimate,
+);
+const missingEstimate = normalizeTodo(
+  { id: 'no-estimate', title: '没有预计用时', createdAt: '2026-01-01T00:00:00.000Z' },
+  { now: clock },
+);
+check(
+  'missing estimate is null without a notice',
+  missingEstimate.todo.estimateMinutes === null
+    && !missingEstimate.notices.some((n) => n.includes('预计用时')),
+  missingEstimate.notices,
+);
+
+// dirty persisted v6 fields are repaired once and reported once
+const repairV6File = path.join(dir, 'v6-repair.json');
+await fsp.writeFile(repairV6File, JSON.stringify({
+  version: 6,
+  todos: [{
+    id: 'bad-v6',
+    title: '脏数据',
+    status: 'completed',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: '2026-01-02T00:00:00.000Z',
+    archivedAt: '2026-01-03T00:00:00.000Z',
+    estimateMinutes: 0,
+    updatedAt: '2026-01-02T00:00:00.000Z',
+  }],
+}), 'utf8');
+const repairV6Store = new TodoStore({ dataFile: repairV6File });
+await repairV6Store.load();
+const repairV6First = await repairV6Store.list({});
+const repairV6Second = await repairV6Store.list({});
+check(
+  'v6 dirty fields are repaired on load',
+  repairV6First.todos[0].archivedAt === null && repairV6First.todos[0].estimateMinutes === null,
+  repairV6First.todos[0],
+);
+check(
+  'v6 repair notices are delivered once',
+  repairV6First.notices.some((n) => n.includes('搁置时间'))
+    && repairV6First.notices.some((n) => n.includes('预计用时'))
+    && !repairV6Second.notices.some((n) => n.includes('搁置时间')),
+  [repairV6First.notices, repairV6Second.notices],
+);
+await repairV6Store.dispose();
+
+// estimate field on create/update
+const estimateStore = new TodoStore({ dataFile: path.join(dir, 'estimate.json'), now: () => clock });
+await estimateStore.load();
+const estimateCreated = await estimateStore.create({ title: '预计 30 分', estimateMinutes: 30 });
+check('create stores estimate', estimateCreated.ok === true && estimateCreated.todo.estimateMinutes === 30, estimateCreated.todo);
+const estimateDefault = await estimateStore.create({ title: '没填预计' });
+check('create defaults estimate to null', estimateDefault.todo.estimateMinutes === null, estimateDefault.todo);
+const estimateBad = await estimateStore.create({ title: 'x', estimateMinutes: 0 });
+check('create rejects invalid estimate', estimateBad.ok === false && estimateBad.code === 'ESTIMATE_INVALID', estimateBad);
+const estimateUpdated = await estimateStore.update(estimateDefault.todo.id, { estimateMinutes: 45 });
+check('update sets estimate', estimateUpdated.ok === true && estimateUpdated.todo.estimateMinutes === 45, estimateUpdated.todo);
+const estimateKept = await estimateStore.update(estimateDefault.todo.id, { title: '没填预计（改名）' });
+check(
+  'update title keeps estimate',
+  estimateKept.todo.estimateMinutes === 45 && estimateKept.todo.title === '没填预计（改名）',
+  estimateKept.todo,
+);
+const estimateBadUpdate = await estimateStore.update(estimateDefault.todo.id, { estimateMinutes: 5000 });
+check('update rejects invalid estimate', estimateBadUpdate.ok === false && estimateBadUpdate.code === 'ESTIMATE_INVALID', estimateBadUpdate);
+const estimateCleared = await estimateStore.update(estimateDefault.todo.id, { estimateMinutes: null });
+check('update null clears estimate', estimateCleared.ok === true && estimateCleared.todo.estimateMinutes === null, estimateCleared.todo);
+const estimateSame = await estimateStore.update(estimateCreated.todo.id, { estimateMinutes: 30 });
+check('update same estimate is a no-op', estimateSame.ok === true && estimateSame.unchanged === true, estimateSame);
+await estimateStore.dispose();
+
+// 搁置 / 取回: archive leaves the active list, unarchive brings it back
+const archiveFile = path.join(dir, 'archive.json');
+const archiveStore = new TodoStore({ dataFile: archiveFile, now: () => clock });
+await archiveStore.load();
+const archivable = await archiveStore.create({ title: '要搁置的任务', project: '工作' });
+clock += 60_000;
+const archived = await archiveStore.archive(archivable.todo.id);
+check('archive ok', archived.ok === true && archived.todo.archivedAt !== null, archived);
+check(
+  'archive keeps the todo pending and unfinished',
+  archived.todo.status === 'pending' && archived.todo.completedAt === null,
+  archived.todo,
+);
+const archivedTwice = await archiveStore.archive(archivable.todo.id);
+check('duplicate archive rejected', archivedTwice.ok === false && archivedTwice.code === 'ALREADY_ARCHIVED', archivedTwice);
+const archivedRaw = JSON.parse(await fsp.readFile(archiveFile, 'utf8'));
+check(
+  'archive persists archivedAt in the v6 envelope',
+  archivedRaw.version === 6 && archivedRaw.todos[0].archivedAt !== null,
+  archivedRaw,
+);
+const archivedList = await archiveStore.list({ filter: 'archived' });
+check(
+  'archived filter lists the shelved todo',
+  archivedList.todos.length === 1 && archivedList.todos[0].id === archivable.todo.id,
+  archivedList.todos,
+);
+const activeList = await archiveStore.list({ filter: 'all' });
+check('all filter hides shelved todos', activeList.todos.length === 0, activeList.todos);
+check(
+  'all filter stats count archived separately',
+  activeList.stats.total === 0 && activeList.stats.archived === 1,
+  activeList.stats,
+);
+check('pending filter hides shelved todos', (await archiveStore.list({ filter: 'pending' })).todos.length === 0);
+check('completed filter hides shelved todos', (await archiveStore.list({ filter: 'completed' })).todos.length === 0);
+// projects[] 的 count/pending/completed 仍是活跃口径（搁置项不算「这一屏能看到的」），
+// 但每个分类额外带 archived 分项 —— 否则带分类筛选时客户端只能把搁置计数硬编码成 0。
+check(
+  'projects summary counts only active todos',
+  activeList.projects.length === 1 && activeList.projects[0].count === 0 && activeList.projects[0].archived === 1,
+  activeList.projects,
+);
+const unarchived = await archiveStore.unarchive(archivable.todo.id);
+check('unarchive clears archivedAt', unarchived.ok === true && unarchived.todo.archivedAt === null, unarchived);
+const unarchiveTwice = await archiveStore.unarchive(archivable.todo.id);
+check('unarchive when not shelved rejected', unarchiveTwice.ok === false && unarchiveTwice.code === 'NOT_ARCHIVED', unarchiveTwice);
+const archiveCompletedTodo = await archiveStore.create({ title: '已完成的任务' });
+await archiveStore.complete(archiveCompletedTodo.todo.id);
+const archiveCompleted = await archiveStore.archive(archiveCompletedTodo.todo.id);
+check('archive a completed todo rejected', archiveCompleted.ok === false && archiveCompleted.code === 'ARCHIVE_INVALID', archiveCompleted);
+const unarchiveCompleted = await archiveStore.unarchive(archiveCompletedTodo.todo.id);
+check('unarchive a completed todo rejected', unarchiveCompleted.ok === false && unarchiveCompleted.code === 'ARCHIVE_INVALID', unarchiveCompleted);
+check('archive unknown id is not found', (await archiveStore.archive('nope')).code === 'NOT_FOUND');
+check('unarchive unknown id is not found', (await archiveStore.unarchive('nope')).code === 'NOT_FOUND');
+
+// completing a shelved todo clears archivedAt and reports it
+clock += 60_000;
+const shelvedAgain = await archiveStore.archive(archivable.todo.id);
+check('archive works again after unarchive', shelvedAgain.ok === true && shelvedAgain.todo.archivedAt !== null, shelvedAgain);
+const shelvedCompleted = await archiveStore.complete(archivable.todo.id);
+check(
+  'completing a shelved todo clears archivedAt',
+  shelvedCompleted.ok === true
+    && shelvedCompleted.todo.archivedAt === null
+    && shelvedCompleted.todo.completedAt !== null,
+  shelvedCompleted,
+);
+check(
+  'completing a shelved todo reports it',
+  (shelvedCompleted.notices ?? []).some((n) => n.includes('已从搁置清单完成')),
+  shelvedCompleted.notices,
+);
+// uncomplete must not resurrect the shelved state
+const reopenedArchived = await archiveStore.uncomplete(archivable.todo.id);
+check(
+  'uncomplete does not restore archivedAt',
+  reopenedArchived.ok === true && reopenedArchived.todo.archivedAt === null,
+  reopenedArchived.todo,
+);
+// update is not a back door into the shelved state
+const attemptedArchiveUpdate = await archiveStore.update(
+  archiveCompletedTodo.todo.id,
+  { archivedAt: '2026-01-01T00:00:00.000Z' },
+);
+check(
+  'update ignores archivedAt',
+  attemptedArchiveUpdate.ok === true && attemptedArchiveUpdate.todo.archivedAt === null,
+  attemptedArchiveUpdate.todo,
+);
+await archiveStore.dispose();
+
+// sortBy estimateMinutes: 未填 always last, both directions
+const estimateSortStore = new TodoStore({ dataFile: path.join(dir, 'estimate-sort.json'), now: () => clock });
+await estimateSortStore.load();
+const estShort = await estimateSortStore.create({ title: '短的', estimateMinutes: 15 });
+const estLong = await estimateSortStore.create({ title: '长的', estimateMinutes: 120 });
+await estimateSortStore.create({ title: '没填的' });
+const estAsc = await estimateSortStore.list({ sortBy: 'estimateMinutes', direction: 'asc' });
+check(
+  'estimate ascending sorts by minutes with 未填 last',
+  estAsc.todos.map((todo) => todo.estimateMinutes).join('|') === '15|120|',
+  estAsc.todos.map((todo) => todo.estimateMinutes),
+);
+check('estimate sort keeps the short todo first', estAsc.todos[0].id === estShort.todo.id, estAsc.todos.map((todo) => todo.title));
+const estDesc = await estimateSortStore.list({ sortBy: 'estimateMinutes', direction: 'desc' });
+check(
+  'estimate descending keeps 未填 last',
+  estDesc.todos.map((todo) => todo.estimateMinutes).join('|') === '120|15|',
+  estDesc.todos.map((todo) => todo.estimateMinutes),
+);
+check('estimate sort keeps the long todo first descending', estDesc.todos[0].id === estLong.todo.id, estDesc.todos.map((todo) => todo.title));
+check('list echoes estimateMinutes sortBy', estDesc.sortBy === 'estimateMinutes', estDesc.sortBy);
+check('list echoes archived filter', (await estimateSortStore.list({ filter: 'archived' })).filter === 'archived');
+check(
+  'sortTodos estimate null last both directions',
+  sortTodos([
+    { id: 'a', createdAt: '2026-01-01T00:00:00.000Z', estimateMinutes: null },
+    { id: 'b', createdAt: '2026-01-01T00:00:00.000Z', estimateMinutes: 30 },
+  ], { sortBy: 'estimateMinutes' }).at(-1).id === 'a'
+    && sortTodos([
+      { id: 'a', createdAt: '2026-01-01T00:00:00.000Z', estimateMinutes: null },
+      { id: 'b', createdAt: '2026-01-01T00:00:00.000Z', estimateMinutes: 30 },
+    ], { sortBy: 'estimateMinutes', direction: 'asc' }).at(-1).id === 'a',
+);
+await estimateSortStore.dispose();
+
+// renderer: shelved count in the list header, estimate on a single todo
+const renderedList = renderTodoResult('list', {
+  ok: true,
+  todos: [],
+  stats: { total: 2, pending: 1, completed: 1, archived: 3 },
+  projects: [],
+  filter: 'all',
+  sortBy: 'createdAt',
+  direction: 'desc',
+});
+check('render list header counts shelved todos', renderedList.includes('另搁置 3 条'), renderedList);
+const renderedSingle = renderTodoResult('get', {
+  ok: true,
+  todo: {
+    id: 'ttl_render1',
+    title: '带预计的任务',
+    project: '',
+    files: [],
+    status: 'pending',
+    priority: '',
+    type: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    archivedAt: null,
+    estimateMinutes: 30,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+});
+check('render single todo appends the estimate', renderedSingle.includes('｜预计 30 分'), renderedSingle);
+const renderedNoEstimate = renderTodoResult('get', {
+  ok: true,
+  todo: {
+    id: 'ttl_render2',
+    title: '没填预计的任务',
+    project: '',
+    files: [],
+    status: 'pending',
+    priority: '',
+    type: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    archivedAt: null,
+    estimateMinutes: null,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+});
+check('render single todo hides a missing estimate', !renderedNoEstimate.includes('｜预计'), renderedNoEstimate);
+const decoratedEstimate = decorateTodo({ ...estimateCreated.todo, estimateMinutes: 45, completedAt: null });
+check(
+  'decorate adds an estimate label',
+  decoratedEstimate.estimateLabel === '预计 45 分' && decoratedEstimate.archivedAtLocal === '-',
+  decoratedEstimate,
+);
+const decoratedNoEstimate = decorateTodo({ ...estimateCreated.todo, estimateMinutes: null, completedAt: null });
+check('decorate hides a missing estimate', decoratedNoEstimate.estimateLabel === '', decoratedNoEstimate);
+
+// shared action layer: archive / unarchive / estimateMinutes
+const v6ActionStore = new TodoStore({ dataFile: path.join(dir, 'v6-actions.json'), now: () => clock });
+await v6ActionStore.load();
+const actionEstimate = await executeTodoAction(v6ActionStore, 'create', { title: '通过 action 带预计', estimateMinutes: 20 });
+check('action create passes estimate', actionEstimate.ok === true && actionEstimate.todo.estimateMinutes === 20, actionEstimate.todo);
+const actionArchived = await executeTodoAction(v6ActionStore, 'archive', { id: actionEstimate.todo.id });
+check('action archive', actionArchived.ok === true && actionArchived.todo.archivedAt !== null, actionArchived);
+const actionArchivedList = await executeTodoAction(v6ActionStore, 'list', { filter: 'archived' });
+check(
+  'action list archived filter',
+  actionArchivedList.ok === true
+    && actionArchivedList.filter === 'archived'
+    && actionArchivedList.stats.archived === 1
+    && actionArchivedList.stats.total === 0,
+  actionArchivedList.stats,
+);
+const actionUnarchived = await executeTodoAction(v6ActionStore, 'unarchive', { id: actionEstimate.todo.id });
+check('action unarchive', actionUnarchived.ok === true && actionUnarchived.todo.archivedAt === null, actionUnarchived);
+const actionEstimateUpdate = await executeTodoAction(v6ActionStore, 'update', { id: actionEstimate.todo.id, estimateMinutes: 90 });
+check('action update passes estimate', actionEstimateUpdate.ok === true && actionEstimateUpdate.todo.estimateMinutes === 90, actionEstimateUpdate.todo);
+const actionEstimateBad = await executeTodoAction(v6ActionStore, 'create', { title: 'x', estimateMinutes: 0 });
+check('action invalid estimate rejected', actionEstimateBad.ok === false && actionEstimateBad.code === 'ESTIMATE_INVALID', actionEstimateBad);
+const actionMarkerEstimate = await executeTodoAction(v6ActionStore, 'create', { title: '写周报 ~30m', estimateMinutes: 45 });
+check(
+  'action create lets the marker beat the picker estimate',
+  actionMarkerEstimate.todo.estimateMinutes === 30 && actionMarkerEstimate.todo.title === '写周报',
+  actionMarkerEstimate.todo,
+);
+const actionQuickEstimate = await executeTodoAction(v6ActionStore, 'list', { sortBy: 'estimateMinutes', direction: 'asc' });
+check(
+  'action list supports sortBy=estimateMinutes',
+  actionQuickEstimate.ok === true && actionQuickEstimate.sortBy === 'estimateMinutes',
+  actionQuickEstimate.sortBy,
+);
+await v6ActionStore.dispose();
+
+
 // unsupported envelope versions are archived, never guessed at
 const futureFile = path.join(dir, 'future.json');
 await fsp.writeFile(futureFile, JSON.stringify({ version: 99, todos: [] }), 'utf8');
@@ -665,6 +1093,12 @@ check('tool quick_add type', toolQuickType.created?.[0]?.type === 'bug', toolQui
 check('tool quick_add type label', toolQuickType.created?.[0]?.typeLabel === '缺陷', toolQuickType.created?.[0]);
 const toolQuickTypeFallback = await tool.execute({ action: 'quick_add', text: '写周报 #工作', type: 'feature' });
 check('tool quick_add form type fallback', toolQuickTypeFallback.created?.[0]?.type === 'feature', toolQuickTypeFallback.created?.[0]);
+// 回归：工具侧 quick_add 曾漏传 estimateMinutes 兜底值（HTTP /quick-add 有、工具没有），
+// 参数在同一个 properties 层里却静默失效，模型会误以为写进去了。
+const toolQuickEstimate = await tool.execute({ action: 'quick_add', text: '写周报 #工作', estimateMinutes: 45 });
+check('tool quick_add estimate fallback', toolQuickEstimate.created?.[0]?.estimateMinutes === 45, toolQuickEstimate.created?.[0]);
+const toolQuickEstimateMarker = await tool.execute({ action: 'quick_add', text: '写周报 ~20m #工作', estimateMinutes: 45 });
+check('tool quick_add marker beats fallback', toolQuickEstimateMarker.created?.[0]?.estimateMinutes === 20, toolQuickEstimateMarker.created?.[0]);
 const renderedTool = tool.output.render({ action: 'quick_add' }, toolQuick);
 check('tool quick_add renders text', Array.isArray(renderedTool) && renderedTool[0].text.includes('写周报'), renderedTool);
 await toolStore.dispose();

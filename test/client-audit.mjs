@@ -94,8 +94,26 @@ const classNames = [...new Set([...src.matchAll(/className:\s*['"]([^'"]+)['"]/g
 const badClass = classNames.filter((name) => name !== '' && !name.startsWith('ttl-'));
 check('all class names use ttl- prefix', badClass.length === 0, badClass.slice(0, 10));
 
-// --- four views present --------------------------------------------------
-for (const view of ['table', 'board', 'gantt', 'calendar']) {
+// --- 十七期布局回归 -------------------------------------------------------
+// 行尾菜单从 3 项变 4 项（多了「搁置 / 取回」），操作列必须装得下 4 × 28px + 内边距，
+// 否则「删除」会掉到第二行、把行高从 20px 撑到 40px（真机 916px 宽度实测过）。
+const actionsWidth = /\.ttl-col-actions\s*\{\s*width:\s*(\d+)px/.exec(src);
+check(
+  'actions column fits four row-menu items',
+  actionsWidth !== null && Number(actionsWidth[1]) >= 130,
+  actionsWidth === null ? null : Number(actionsWidth[1]),
+);
+// 新建框是 flex-wrap 容器：加上「预计用时」选择器后输入框基础宽度必须收窄，
+// 否则「添加」会被挤到第二行单独成行（真机 916px 实测过）。
+const composerBasis = /\.ttl-composer-input\s*\{[^}]*flex:\s*1\s+1\s+(\d+)px/.exec(src);
+check(
+  'composer input basis leaves room for the estimate picker',
+  composerBasis !== null && Number(composerBasis[1]) <= 160,
+  composerBasis === null ? null : Number(composerBasis[1]),
+);
+
+// --- five views present --------------------------------------------------
+for (const view of ['table', 'board', 'gantt', 'calendar', 'insights']) {
   check(`view "${view}" wired`, new RegExp(`['"]${view}['"]`).test(src));
 }
 check(
@@ -106,7 +124,8 @@ check(
     && /(?:const|var|let)\s+renderCalendarView\s*=/.test(src)
     && /function boardColumns\(/.test(src)
     && /function buildCalendarCells\(/.test(src)
-    && /function GanttView\(/.test(src),
+    && /function GanttView\(/.test(src)
+    && /(?:const|var|let)\s+renderInsightsView\s*=/.test(src),
 );
 check('calendar uses a 6x7 grid', /42/.test(src) && /function buildCalendarCells|(?:const|var|let) buildCalendarCells/.test(src));
 

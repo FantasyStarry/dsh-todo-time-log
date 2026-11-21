@@ -6,7 +6,7 @@ import { BOARD_COMPLETED_LIMIT, BOARD_MOVE_UNCATEGORIZED, PRIORITIES, TYPES } fr
 import { CheckButton, TextPlaceholder } from '../widgets.js';
 
 export function createBoardView(deps) {
-  const { boardActionsId, boardGroupBy, boardLaneCollapsed, boardShowAllCompleted, busyId, confirmId, density, editingId, editingPriority, editingType, emptyActionKey, emptyColumnKey, handleColumnAdd, handleDelete, handleEmptyAction, handleLaneAdd, handleMoveProject, handleSetPriority, handleSetType, handleToggle, isBusy, nowMs, priorityBadge, prioritySelectControl, projectInput, projectSuggestions, renderFileChips, setBoardActionsId, setBoardLaneCollapsed, setBoardShowAllCompleted, setConfirmId, setEditingPriority, setEditingType, startEdit, statusBadge, titleInput, typeBadge, typeSelectControl, visibleTodos } = deps;
+  const { boardActionsId, boardGroupBy, boardLaneCollapsed, boardShowAllCompleted, busyId, confirmId, density, editingId, editingPriority, editingType, emptyActionKey, emptyColumnKey, handleColumnAdd, handleDelete, handleEmptyAction, handleLaneAdd, handleMoveProject, handleSetPriority, handleSetType, handleToggle, isBusy, nowMs, priorityBadge, prioritySelectControl, projectInput, projectSuggestions, renderEstimateControl, renderFileChips, setBoardActionsId, setBoardLaneCollapsed, setBoardShowAllCompleted, setConfirmId, setEditingPriority, setEditingType, startEdit, statusBadge, titleInput, typeBadge, typeSelectControl, visibleTodos } = deps;
 
   /** 卡片上的一行时长：未完成 = 创建→现在；已完成 = 创建→完成。 */
   const renderBoardDuration = (todo) => {
@@ -74,7 +74,8 @@ export function createBoardView(deps) {
             titleInput(todo),
             projectInput(todo),
             prioritySelectControl(editingPriority, setEditingPriority, busyId === todo.id),
-            typeSelectControl(editingType, setEditingType, busyId === todo.id)
+            typeSelectControl(editingType, setEditingType, busyId === todo.id),
+            renderEstimateControl('edit', busyId === todo.id)
           )
         : [
             h(CheckButton, {

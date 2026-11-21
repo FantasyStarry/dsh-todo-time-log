@@ -11,6 +11,7 @@
  */
 import {
   extractNotices,
+  formatAge,
   formatDurationShort,
   messageOf,
   normalizeChatErrors,
@@ -364,6 +365,7 @@ function QuickRow(props) {
         'div',
         { className: 'ttl-quick-row-meta' },
         h('span', { className: 'ttl-quick-elapsed' }, t('board.elapsed', { duration: elapsed })),
+        h('span', { className: 'ttl-quick-age' }, t('quick.age', { age: formatAge(todo.createdAt, now) })),
         h(QuickProject, { project: todo.project })
       )
     )

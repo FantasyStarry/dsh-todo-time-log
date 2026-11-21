@@ -1,5 +1,5 @@
 /** 待办详情内容（dl 列表），供四个视图复用。 */
-import { EMPTY_TIME, formatDuration, formatTime, normalizeFiles, normalizePriority, normalizeProject, normalizeType, projectLabel } from './helpers.js';
+import { EMPTY_TIME, estimateDeviation, formatDuration, formatEstimate, formatTime, normalizeEstimate, normalizeFiles, normalizePriority, normalizeProject, normalizeType, projectLabel, toMillis } from './helpers.js';
 import { t } from './i18n.js';
 import { h } from './runtime.js';
 
@@ -15,6 +15,24 @@ export function createDetailContent(deps) {
     } else {
       const elapsed = formatDuration(todo.createdAt, Date.now());
       if (elapsed !== EMPTY_TIME) durationText = t('table.elapsed', { duration: elapsed });
+    }
+    // 预计用时始终显示（未填为 '-'，保持字段一致）；执行偏差只对「已完成且有预计且有跨度」出现。
+    const estimate = normalizeEstimate(todo.estimateMinutes);
+    const startMs = toMillis(todo.createdAt);
+    const endMs = toMillis(todo.completedAt);
+    const deviation =
+      completed && estimate !== null && startMs !== null && endMs !== null
+        ? estimateDeviation(estimate, endMs - startMs)
+        : null;
+    let deviationText = null;
+    if (deviation !== null) {
+      if (deviation.kind === 'even') {
+        deviationText = t('detail.deviationEven');
+      } else if (deviation.kind === 'over') {
+        deviationText = t('estimate.over', { percent: Math.abs(deviation.percent) });
+      } else if (deviation.kind === 'under') {
+        deviationText = t('estimate.under', { percent: Math.abs(deviation.percent) });
+      }
     }
     return h(
       'dl',
@@ -51,6 +69,10 @@ export function createDetailContent(deps) {
       h('dd', { className: 'ttl-detail-value' }, formatTime(todo.updatedAt)),
       h('dt', { className: 'ttl-detail-label' }, t('detail.duration')),
       h('dd', { className: 'ttl-detail-value' }, durationText),
+      h('dt', { className: 'ttl-detail-label' }, t('detail.estimate')),
+      h('dd', { className: 'ttl-detail-value' }, formatEstimate(todo.estimateMinutes)),
+      deviationText === null ? null : h('dt', { className: 'ttl-detail-label' }, t('detail.deviation')),
+      deviationText === null ? null : h('dd', { className: 'ttl-detail-value' }, deviationText),
       h('dt', { className: 'ttl-detail-label' }, t('detail.id')),
       h('dd', { className: 'ttl-detail-value' }, h('span', { className: 'ttl-detail-id' }, todo.id))
     );

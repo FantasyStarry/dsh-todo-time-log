@@ -62,14 +62,26 @@ try {
   }
   check(
     'export json content is a store envelope',
-    exportedEnvelope !== null && exportedEnvelope.version === 5 && exportedEnvelope.todos.length === 1,
+    exportedEnvelope !== null && exportedEnvelope.version === 6 && exportedEnvelope.todos.length === 1,
     exportedEnvelope,
+  );
+  check(
+    'export json includes the v6 fields',
+    exportedEnvelope !== null
+      && exportedEnvelope.todos[0].archivedAt === null
+      && exportedEnvelope.todos[0].estimateMinutes === null,
+    exportedEnvelope?.todos?.[0],
   );
 
   const exportedCsv = await post('export', { format: 'csv' });
   check('export csv 200', exportedCsv.status === 200 && exportedCsv.body.ok === true, exportedCsv);
   check('export csv has BOM and header', String(exportedCsv.body.value?.content).startsWith('\uFEFF' + 'ID,标题'), String(exportedCsv.body.value?.content).slice(0, 20));
   check('export csv filename', /\.csv$/.test(String(exportedCsv.body.value?.filename)), exportedCsv.body.value?.filename);
+  check(
+    'export csv has the v6 columns',
+    String(exportedCsv.body.value?.content).split('\r\n')[0].includes('预计(分钟),搁置时间'),
+    String(exportedCsv.body.value?.content).split('\r\n')[0],
+  );
 
   const badFormat = await post('export', { format: 'xml' });
   check('export unknown format 400', badFormat.status === 400, badFormat.status);
@@ -139,6 +151,67 @@ try {
     'CSV import maps Chinese values',
     csvTodo?.project === '生活' && csvTodo?.status === 'completed' && csvTodo?.priority === 'low' && csvTodo?.type === 'improvement',
     csvTodo,
+  );
+
+  // v6 fields survive an HTTP export -> import round trip.
+  const v6Record = {
+    id: 'ttl_import_v6',
+    title: '六期导入任务',
+    project: '工作',
+    files: [],
+    status: 'pending',
+    priority: '',
+    type: '',
+    createdAt: '2026-11-02T00:00:00.000Z',
+    completedAt: null,
+    archivedAt: '2026-11-03T00:00:00.000Z',
+    estimateMinutes: 90,
+    updatedAt: '2026-11-03T00:00:00.000Z',
+  };
+  const v6Import = await post('import', {
+    content: JSON.stringify({ version: 6, todos: [v6Record] }),
+    mode: 'merge',
+  });
+  check('v6 envelope import 200', v6Import.status === 200 && v6Import.body.ok === true, v6Import);
+  const v6List = await post('list', { filter: 'archived' });
+  const v6Todo = (v6List.body.value?.todos ?? []).find((todo) => todo.id === 'ttl_import_v6');
+  check(
+    'imported v6 record keeps archivedAt and estimateMinutes',
+    v6Todo?.archivedAt === '2026-11-03T00:00:00.000Z' && v6Todo?.estimateMinutes === 90,
+    v6Todo,
+  );
+  // A shelved todo must not disappear from a download: /export snapshots the
+  // whole dataset instead of reusing the active-list filter.
+  const shelvedExportSeed = await store.create({ title: '导出用的搁置任务' });
+  await store.archive(shelvedExportSeed.todo.id);
+  const exportWithShelved = await post('export', { format: 'json' });
+  const exportedWithShelved = JSON.parse(exportWithShelved.body.value.content);
+  check(
+    'export includes shelved todos',
+    exportedWithShelved.todos.some((todo) => todo.id === shelvedExportSeed.todo.id && todo.archivedAt !== null),
+    exportedWithShelved.todos.map((todo) => [todo.title, todo.archivedAt]),
+  );
+  check(
+    'export count includes shelved todos',
+    exportedWithShelved.count === exportedWithShelved.todos.length,
+    [exportedWithShelved.count, exportedWithShelved.todos.length],
+  );
+  const exportCsvWithShelved = await post('export', { format: 'csv' });
+  check(
+    'CSV export includes shelved rows',
+    String(exportCsvWithShelved.body.value?.content).includes('导出用的搁置任务'),
+    String(exportCsvWithShelved.body.value?.content).split('\r\n').length,
+  );
+  // The exported CSV carries both new columns back through /import.
+  const v6CsvExport = await post('export', { format: 'csv' });
+  const v6CsvRoundTrip = await post('import', { content: v6CsvExport.body.value.content, mode: 'merge' });
+  check('v6 CSV export re-imports', v6CsvRoundTrip.status === 200 && v6CsvRoundTrip.body.ok === true, v6CsvRoundTrip);
+  const v6AfterRoundTrip = await post('list', { filter: 'archived' });
+  const v6RoundTripTodo = (v6AfterRoundTrip.body.value?.todos ?? []).find((todo) => todo.id === 'ttl_import_v6');
+  check(
+    'CSV round trip keeps the v6 fields',
+    v6RoundTripTodo?.estimateMinutes === 90 && v6RoundTripTodo?.archivedAt === '2026-11-03T00:00:00.000Z',
+    v6RoundTripTodo,
   );
 
   // Unknown mode falls back to merge.

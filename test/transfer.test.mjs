@@ -34,6 +34,8 @@ const COMPLETED = {
   type: 'chore',
   createdAt: '2026-11-05T01:00:00.000Z',
   completedAt: '2026-11-05T02:30:00.000Z',
+  archivedAt: null,
+  estimateMinutes: 45,
   updatedAt: '2026-11-05T02:30:00.000Z',
 };
 const PENDING = {
@@ -46,7 +48,9 @@ const PENDING = {
   type: '',
   createdAt: '2026-11-05T03:00:00.000Z',
   completedAt: null,
-  updatedAt: '2026-11-05T03:00:00.000Z',
+  archivedAt: '2026-11-05T04:00:00.000Z',
+  estimateMinutes: null,
+  updatedAt: '2026-11-05T04:00:00.000Z',
 };
 const TODOS = [COMPLETED, PENDING];
 
@@ -60,6 +64,15 @@ check('JSON export keeps ids', jsonEnvelope.todos[0].id === COMPLETED.id);
 check('JSON export keeps completion time', jsonEnvelope.todos[0].completedAt === COMPLETED.completedAt);
 check('JSON export has exporter metadata', jsonEnvelope.exporter?.name === 'dsh-todo-time-log');
 check('JSON export ends with a newline', jsonText.endsWith('\n'));
+check('JSON export version is 6', jsonEnvelope.version === 6, jsonEnvelope.version);
+check(
+  'JSON export writes both v6 fields',
+  jsonEnvelope.todos[0].estimateMinutes === 45
+    && jsonEnvelope.todos[0].archivedAt === null
+    && jsonEnvelope.todos[1].archivedAt === '2026-11-05T04:00:00.000Z'
+    && jsonEnvelope.todos[1].estimateMinutes === null,
+  jsonEnvelope.todos,
+);
 
 const jsonRoundTrip = parseImportText(jsonText);
 check('JSON round-trip parses', jsonRoundTrip.ok === true, jsonRoundTrip);
@@ -72,6 +85,16 @@ check(
   'JSON round-trip keeps files',
   jsonRoundTrip.records.find((todo) => todo.id === COMPLETED.id)?.files.length === 2,
 );
+check(
+  'JSON round-trip keeps estimateMinutes',
+  jsonRoundTrip.records.find((todo) => todo.id === COMPLETED.id)?.estimateMinutes === 45,
+  jsonRoundTrip.records.find((todo) => todo.id === COMPLETED.id),
+);
+check(
+  'JSON round-trip keeps archivedAt',
+  jsonRoundTrip.records.find((todo) => todo.id === PENDING.id)?.archivedAt === '2026-11-05T04:00:00.000Z',
+  jsonRoundTrip.records.find((todo) => todo.id === PENDING.id),
+);
 
 // ---- CSV export -----------------------------------------------------------
 
@@ -82,6 +105,8 @@ check('CSV has a Chinese header row', csvText.split('\r\n')[0].includes('标题'
 check('CSV quotes fields containing a comma', csvText.includes('"写周报, ""含引号"""'), csvText.slice(0, 200));
 check('CSV joins files with a semicolon', csvText.includes('src/a.ts;docs/b.md'));
 check('CSV exposes a duration column', csvText.split('\r\n')[0].includes('耗时(分钟)'));
+check('CSV appends the estimate column after the duration', /耗时\(分钟\),预计\(分钟\),搁置时间/.test(csvText.split('\r\n')[0]), csvText.split('\r\n')[0]);
+check('CSV writes the estimate value', csvText.split('\r\n')[1].split(',').includes('45'), csvText.split('\r\n')[1]);
 
 const csvRoundTrip = parseImportText(csvText);
 check('CSV round-trip parses', csvRoundTrip.ok === true, csvRoundTrip);
@@ -99,6 +124,17 @@ check(
 );
 check('CSV round-trip restores files', csvRoundTrip.records[0].files.join('|') === 'src/a.ts|docs/b.md');
 check('CSV round-trip keeps unset priority empty', csvRoundTrip.records[1].priority === '');
+check(
+  'CSV round-trip keeps estimateMinutes',
+  csvRoundTrip.records[0].estimateMinutes === 45,
+  csvRoundTrip.records[0],
+);
+check(
+  'CSV round-trip keeps archivedAt',
+  csvRoundTrip.records[1].archivedAt === '2026-11-05T04:00:00.000Z',
+  csvRoundTrip.records[1],
+);
+check('CSV round-trip keeps a missing estimate null', csvRoundTrip.records[1].estimateMinutes === null, csvRoundTrip.records[1]);
 
 // local naive timestamps are interpreted in local time
 const localCsv = [
@@ -129,6 +165,59 @@ check(
   aliasParsed.records?.[0],
 );
 
+// a CSV without the v6 columns imports with null (missing column = null)
+const legacyCsv = [
+  '\uFEFFID,标题,分类,文件,状态,优先级,类型,创建时间,完成时间,更新时间,耗时(分钟)',
+  'ttl_legacy1,旧表任务,工作,,已完成,高,缺陷,2026-11-01 09:00:00,2026-11-02 09:00:00,2026-11-02 09:00:00,120',
+].join('\r\n');
+const legacyCsvParsed = parseImportText(legacyCsv);
+check(
+  'CSV without the v6 columns imports as null',
+  legacyCsvParsed.ok === true
+    && legacyCsvParsed.records[0].archivedAt === null
+    && legacyCsvParsed.records[0].estimateMinutes === null,
+  legacyCsvParsed.records?.[0],
+);
+check(
+  'CSV without the v6 columns needs no repair notice',
+  !(legacyCsvParsed.notices ?? []).some((notice) => notice.includes('修复')),
+  legacyCsvParsed.notices,
+);
+
+// v6 CSV header aliases: estimate / 预计 / 预计用时 and archivedAt / 搁置时间
+const v6AliasRows = [
+  '\uFEFF标题,预计,搁置时间',
+  '别名预计任务,90,2026-11-02 09:00:00',
+].join('\r\n');
+const v6AliasParsed = parseImportText(v6AliasRows);
+check(
+  'CSV estimate aliases are recognised',
+  v6AliasParsed.ok === true
+    && v6AliasParsed.records[0].estimateMinutes === 90
+    && v6AliasParsed.records[0].archivedAt !== null,
+  v6AliasParsed.records?.[0],
+);
+const v6EnglishAlias = parseImportText('\uFEFFtitle,estimate,archivedAt\r\n英文列名,30,');
+check(
+  'CSV English v6 aliases are recognised',
+  v6EnglishAlias.ok === true
+    && v6EnglishAlias.records[0].estimateMinutes === 30
+    && v6EnglishAlias.records[0].archivedAt === null,
+  v6EnglishAlias.records?.[0],
+);
+const v6FieldNameAlias = parseImportText('\uFEFF标题,预计用时\r\n预计用时列,15');
+check(
+  'CSV 预计用时 alias is recognised',
+  v6FieldNameAlias.ok === true && v6FieldNameAlias.records[0].estimateMinutes === 15,
+  v6FieldNameAlias.records?.[0],
+);
+const invalidEstimateCell = parseImportText('\uFEFF标题,预计(分钟)\r\n非法预计,5000');
+check(
+  'CSV out-of-range estimate is repaired to null',
+  invalidEstimateCell.ok === true && invalidEstimateCell.records[0].estimateMinutes === null,
+  invalidEstimateCell.records?.[0],
+);
+
 // ---- legacy / alternative JSON shapes ------------------------------------
 
 const v1 = JSON.stringify({
@@ -144,6 +233,31 @@ check(
     && v1Parsed.records[0].type === ''
     && v1Parsed.records[0].files.length === 0,
   v1Parsed.records?.[0],
+);
+
+const v5Json = parseImportText(JSON.stringify({
+  version: 5,
+  todos: [{
+    id: 'ttl_v5',
+    title: '五期数据',
+    project: '工作',
+    files: [],
+    status: 'pending',
+    priority: 'high',
+    type: 'bug',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }],
+}));
+check(
+  'v5 envelope imports with null v6 fields',
+  v5Json.ok === true
+    && v5Json.records[0].estimateMinutes === null
+    && v5Json.records[0].archivedAt === null
+    && v5Json.records[0].priority === 'high'
+    && v5Json.records[0].type === 'bug',
+  v5Json.records?.[0],
 );
 
 const bareArray = parseImportText(JSON.stringify([{ id: 'ttl_bare', title: '裸数组' }]));
